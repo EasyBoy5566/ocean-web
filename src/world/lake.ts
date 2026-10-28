@@ -31,7 +31,7 @@ export class LakeWorld extends World {
       camera: { eyeY: DOCK_Y + 1.7, vfovPortrait: 72, vfovLandscape: 46, horizonPortrait: 0.3, horizonLandscape: 0.12 },
       water: {
         mode: 'lake',
-        absorb: [0.5, 0.13, 0.1],
+        absorb: [0.75, 0.24, 0.2],
         scatter: [0.0022, 0.0075, 0.0078],
         detail: 0.075,
         detailScale: [0.085, 0.22],

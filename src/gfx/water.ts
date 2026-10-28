@@ -1,7 +1,5 @@
-import {
-  CustomBlending, Matrix4, Mesh, OneFactor, OneMinusSrcAlphaFactor, ShaderMaterial, Vector2, Vector3, Vector4,
-  type Texture,
-} from 'three';
+import { Matrix4, Mesh, ShaderMaterial, Vector2, Vector3, Vector4, type Texture } from 'three';
+import { LAYER_SURFACE } from './composite';
 import { GLOBALS, OUTPUT } from './glsl';
 import { globals } from './globals';
 import { createCameraGrid } from './grid';
@@ -21,6 +19,7 @@ export interface WaterOptions {
   normalTex: Texture;
   reflection: Texture;
   reflectionMatrix: Matrix4;
+  scene: { color: Texture; depth: Texture };
   sim: { tex: Texture | null; map: Vector4; size: Vector2 };
   data: { tex: Texture; bounds: Vector4; depthMax: number; flowMax: number };
   detail: number;
@@ -110,6 +109,11 @@ uniform float uRoughFar;
 uniform float uShoreFoam;
 uniform vec3 uSSS;
 uniform float uSteep;
+uniform sampler2D uSceneColor;
+uniform sampler2D uSceneDepth;
+uniform vec2 uResolution;
+uniform float uRefract;
+uniform float uRippleGain;
 varying vec3 vWorld;
 varying vec4 vRefl;
 varying vec3 vNrm;
@@ -166,7 +170,7 @@ vec2 simSlope(vec2 xz, out float foam) {
   float hu = texture2D(uSimTex, uv + vec2(0.0, texel.y)).r;
   float e = smoothstep(0.0, 0.05, uv.x) * smoothstep(1.0, 0.95, uv.x) * smoothstep(1.0, 0.92, uv.y);
   foam = c.b * e;
-  return vec2((hr - hl) / (2.0 * s), -(hu - hd) / (2.0 * s)) * e;
+  return vec2((hr - hl) / (2.0 * s), -(hu - hd) / (2.0 * s)) * e * uRippleGain;
 }
 
 float specGGX(vec3 n, vec3 v, vec3 l, float r) {
@@ -224,8 +228,10 @@ void main() {
   float rough = clamp(uRough + uRoughFar * smoothstep(15.0, 3000.0, dist), 0.02, 0.6);
   vec3 spec = uSunColor * specGGX(n, V, uSunDir, rough) + uMoonColor * specGGX(n, V, uMoonDir, rough * 1.3);
 
-  float bubbles = texture2D(uNoiseTex, vWorld.xz * 1.7 + fract(uTime * 0.05)).b;
-  float foam = simFoam * smoothstep(0.25, 0.75, bubbles + simFoam * 0.3) * 0.9;
+  // fine, speckled foam: two scales of noise so it reads as bubbles, not a blot
+  float b1 = texture2D(uNoiseTex, vWorld.xz * 4.1 + fract(uTime * 0.03)).b;
+  float b2 = texture2D(uNoiseTex, vWorld.xz * 9.3 - fract(uTime * 0.05)).b;
+  float foam = simFoam * smoothstep(0.45, 0.8, b1 * 0.6 + b2 * 0.6 + simFoam * 0.25) * 0.85;
 #ifdef OCEAN
   // whitecaps only where a steep crest coincides with a gust patch
   float crest = smoothstep(0.7, 1.0, vCrest / max(uSteep, 1e-3));
@@ -253,6 +259,13 @@ void main() {
 #endif
   foam = clamp(foam, 0.0, 1.0);
 
+  // What is seen through the surface: the scene behind, bent by the surface normal.
+  // Samples that land on something in front of the water are not refracted.
+  vec2 suv = gl_FragCoord.xy / uResolution;
+  vec2 ruv = clamp(suv + vec2(n.x, n.z) * uRefract / (1.0 + dist * 0.06), vec2(0.001), vec2(0.999));
+  if (texture2D(uSceneDepth, ruv).r < gl_FragCoord.z) ruv = suv;
+  vec3 under = texture2D(uSceneColor, ruv).rgb;
+
   vec3 premul = refl * F + spec;
   float alpha = F;
 
@@ -271,7 +284,7 @@ void main() {
 
   float fg = fogAmount(vWorld, dist);
   premul = premul * (1.0 - fg) + hazeColor(-V) * fg * alpha;
-  gl_FragColor = vec4(premul, alpha);
+  gl_FragColor = vec4(under * (1.0 - alpha) + premul, 1.0);
   ${OUTPUT}
 }
 `;
@@ -311,20 +324,18 @@ export function createWater(o: WaterOptions) {
       uSSS: { value: new Vector3(...o.sss) },
       uWaves: { value: waves },
       uSteep: { value: o.steepness ?? 0 },
+      uSceneColor: { value: o.scene.color },
+      uSceneDepth: { value: o.scene.depth },
+      uResolution: { value: new Vector2(1, 1) },
+      uRefract: { value: 0.035 },
+      uRippleGain: { value: 1.7 },
     },
     vertexShader: WATER_VERT,
     fragmentShader: WATER_FRAG,
-    transparent: true,
-    depthWrite: false,
-    blending: CustomBlending,
-    blendSrc: OneFactor,
-    blendDst: OneMinusSrcAlphaFactor,
-    blendSrcAlpha: OneFactor,
-    blendDstAlpha: OneMinusSrcAlphaFactor,
   });
   const mesh = new Mesh(geo, material);
   mesh.frustumCulled = false;
-  mesh.renderOrder = 10;
+  mesh.layers.set(LAYER_SURFACE);
   return { mesh, material };
 }
 

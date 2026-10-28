@@ -1,5 +1,5 @@
 import { Color, DoubleSide, ShaderMaterial } from 'three';
-import { GLOBALS, OUTPUT } from './glsl';
+import { APPARENT, GLOBALS, OUTPUT } from './glsl';
 import { globals } from './globals';
 
 export interface TerrainColors {
@@ -26,6 +26,7 @@ export function createTerrainMaterial(c: TerrainColors) {
       uBed: { value: c.bed },
     },
     vertexShader: /* glsl */ `
+      ${APPARENT}
       attribute vec4 aMask;
       varying vec3 vWorld;
       varying vec3 vNormal;
@@ -35,7 +36,7 @@ export function createTerrainMaterial(c: TerrainColors) {
         vWorld = wp.xyz;
         vNormal = normalize(mat3(modelMatrix) * normal);
         vMask = aMask;
-        gl_Position = projectionMatrix * viewMatrix * wp;
+        gl_Position = projectionMatrix * viewMatrix * vec4(apparentPosition(wp.xyz), 1.0);
       }
     `,
     fragmentShader: /* glsl */ `
@@ -115,6 +116,7 @@ export function createLitMaterial(o: LitOptions) {
       uOpacity: { value: 1 },
     },
     vertexShader: /* glsl */ `
+      ${APPARENT}
       uniform float uTime;
       uniform float uSway;
       varying vec3 vWorld;
@@ -142,7 +144,7 @@ export function createLitMaterial(o: LitOptions) {
         vColor *= instanceColor;
       #endif
         vLocal = position;
-        gl_Position = projectionMatrix * viewMatrix * wp;
+        gl_Position = projectionMatrix * viewMatrix * vec4(apparentPosition(wp.xyz), 1.0);
       }
     `,
     fragmentShader: /* glsl */ `

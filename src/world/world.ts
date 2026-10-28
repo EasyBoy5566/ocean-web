@@ -10,7 +10,8 @@ import { createCameraGrid } from '../gfx/grid';
 import { createTerrainMaterial, type TerrainColors } from '../gfx/materials';
 import { PlanarReflection } from '../gfx/reflection';
 import { RippleSim, type SimDomain } from '../gfx/ripples';
-import { Splash } from '../gfx/splash';
+import { LAYER_SCENE, LAYER_SURFACE, SceneTarget } from '../gfx/composite';
+import { SplashFX } from '../gfx/splash';
 import { createWater, type WaterMode, type Wave } from '../gfx/water';
 import { bakeWaterData } from '../gfx/waterData';
 import { clamp, DEG, lerp, smoothstep } from '../util/math';
@@ -82,7 +83,7 @@ const tmpV = new Vector3();
 export abstract class World {
   abstract readonly id: SceneId;
   readonly scene = new Scene();
-  readonly camera = new PerspectiveCamera(50, 1, 0.1, 30000);
+  readonly camera = new PerspectiveCamera(50, 1, 0.25, 30000);
   protected deps: WorldDeps;
   protected cfg!: WorldConfig;
   protected waterMaterial!: ShaderMaterial;
@@ -91,7 +92,8 @@ export abstract class World {
   protected reflection!: PlanarReflection;
   protected sim: RippleSim | null = null;
   protected dataTex!: DataTexture;
-  protected splash!: Splash;
+  protected splash!: SplashFX;
+  protected sceneTarget!: SceneTarget;
   protected stones!: Stones;
   protected time = 0;
   private basePitch = 0;
@@ -176,6 +178,8 @@ export abstract class World {
 
     this.reflection = new PlanarReflection(tier.reflectionScale, this.deps.halfFloat);
     this.disposables.push(this.reflection);
+    this.sceneTarget = new SceneTarget(this.deps.halfFloat, tier.tier === 'low' ? 0 : 4);
+    this.disposables.push(this.sceneTarget);
 
     const w = cfg.water;
     const { mesh, material } = createWater({
@@ -183,6 +187,7 @@ export abstract class World {
       normalTex: this.deps.waterNormalTex,
       reflection: this.reflection.target.texture,
       reflectionMatrix: this.reflection.textureMatrix,
+      scene: { color: this.sceneTarget.color, depth: this.sceneTarget.depth },
       sim: {
         tex: this.sim ? this.sim.texture : null,
         map: this.sim ? this.sim.map : new Vector4(1, 1, 1, 0),
@@ -208,11 +213,12 @@ export abstract class World {
     this.scene.add(mesh);
     this.disposables.push(mesh.geometry, material);
 
-    this.splash = new Splash();
+    this.splash = new SplashFX();
     this.splash.onLand = (x, z, s) => {
-      if (s > 0.018 && this.sim && Math.random() < 0.35) this.sim.addDrop(x, z, 0.03, 0.0012);
+      // larger drops falling back leave their own small rings
+      if (s > 0.004 && this.sim && Math.random() < 0.5) this.sim.addDrop(x, z, 0.012 + s * 2, 0.0008 + s * 0.15);
     };
-    this.scene.add(this.splash.points);
+    this.splash.objects.forEach((o) => this.scene.add(o));
     this.disposables.push(this.splash);
 
     this.stones = new Stones(this.scene, {
@@ -220,16 +226,18 @@ export abstract class World {
       terrainHeight: (x, z) => this.solidHeight(x, z),
       onSkip: (p, v, n) => {
         const e = clamp(Math.hypot(v.x, v.z) / 18, 0, 1);
-        this.splash.burst('skip', p, e, v);
-        this.sim?.addDrop(p.x, p.z, 0.07, 0.006 + 0.004 * e);
+        this.splash.skip(p, e, v);
+        this.sim?.addDrop(p.x, p.z, 0.06, 0.007 + 0.005 * e);
         this.deps.sound.splash('skip', p, e * (1 - n * 0.03));
       },
       onPlunge: (p, v) => {
         const e = clamp(v.length() / 16, 0, 1);
-        this.splash.burst('plunge', p, e);
-        this.sim?.addDrop(p.x, p.z, 0.1, 0.016 + 0.012 * e);
+        this.sim?.addDrop(p.x, p.z, 0.09 + 0.04 * e, 0.02 + 0.016 * e);
+        // the jet falling back starts a second set of rings
+        this.splash.plunge(p, e, (q) => this.sim?.addDrop(q.x, q.z, 0.05, 0.008 + 0.006 * e));
         this.deps.sound.splash('plunge', p, e);
       },
+      onSink: (p) => this.splash.bubbles.emit(p, 1, 0.03),
       onLand: (p, v) => this.deps.sound.splash('land', p, clamp(v.length() / 16, 0, 1)),
     });
     this.disposables.push(this.stones);
@@ -269,7 +277,9 @@ export abstract class World {
     const horizon = lerp(f.horizonPortrait, f.horizonLandscape, t);
     this.basePitch = -Math.atan(horizon * Math.tan((this.camera.fov * DEG) / 2));
     this.reflection.setSize(drawW, drawH);
-    this.splash.pixelScale = drawH / (2 * Math.tan((this.camera.fov * DEG) / 2));
+    this.sceneTarget.setSize(drawW, drawH);
+    this.waterMaterial.uniforms.uResolution.value.set(drawW, drawH);
+    this.splash.setViewport(drawW, drawH, drawH / (2 * Math.tan((this.camera.fov * DEG) / 2)));
     this.poseCamera();
   }
 
@@ -290,7 +300,7 @@ export abstract class World {
     this.time += dt;
     this.poseCamera();
     this.stones.update(dt);
-    this.splash.update(dt, (x, z) => this.waterHeight(x, z));
+    this.splash.update(dt, (x, z) => this.waterHeight(x, z), this.time);
     this.onUpdate?.(dt);
     if (this.sim) {
       this.sim.update(this.deps.renderer, dt);
@@ -299,7 +309,6 @@ export abstract class World {
   }
 
   render(renderer: WebGLRenderer) {
-    if (params.dbg.has('nosplash')) this.splash.points.visible = false;
     if (params.dbg.has('norefl')) this.waterMaterial.uniforms.uReflStrength.value = 0;
     if (params.dbg.has('noterrain')) this.terrain.visible = false;
     if (params.dbg.has('double')) this.waterMaterial.side = 2;
@@ -308,9 +317,21 @@ export abstract class World {
     if (params.dbg.has('nosim')) this.waterMaterial.uniforms.uSimMap.value = new Vector4(1, 1, 1, 0);
     if (params.dbg.has('nodata')) this.waterMaterial.uniforms.uDataBounds.value = new Vector4(1e6, 1e6, 1, 1);
     if (params.dbg.has('noprops')) this.scene.children.forEach((c) => { if ((c as { isInstancedMesh?: boolean }).isInstancedMesh) c.visible = false; });
-    this.reflection.render(renderer, this.scene, this.camera, 0, [this.water]);
-    renderer.setRenderTarget(null);
+    this.reflection.render(renderer, this.scene, this.camera, 0);
+    // 1. everything behind and under the water, into a texture the water can refract
+    this.camera.layers.set(LAYER_SCENE);
+    renderer.setRenderTarget(this.sceneTarget.target);
+    renderer.clear();
     renderer.render(this.scene, this.camera);
+    // 2. that image (and its depth) on screen, then the water surface and spray over it
+    renderer.setRenderTarget(null);
+    this.sceneTarget.composite(renderer);
+    this.camera.layers.set(LAYER_SURFACE);
+    const autoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.render(this.scene, this.camera);
+    renderer.autoClear = autoClear;
+    this.camera.layers.set(LAYER_SCENE);
   }
 
   /** Finds where a screen point meets the water, or null if land or sky is in the way. */
@@ -339,8 +360,8 @@ export abstract class World {
     if (!p) return false;
     const dist = p.distanceTo(this.camera.position);
     const scale = clamp(dist / 12, 1, 6);
-    this.splash.burst('tap', p, 0.5);
-    this.sim?.addDrop(p.x, p.z, 0.06 * scale, 0.011 + 0.003 * scale);
+    this.sim?.addDrop(p.x, p.z, 0.045 * scale, 0.012 + 0.003 * scale);
+    this.splash.tap(p, (q) => this.sim?.addDrop(q.x, q.z, 0.03 * scale, 0.004));
     this.deps.sound.splash('tap', p, 0.5);
     return true;
   }

@@ -8,6 +8,8 @@ export interface StoneHost {
   terrainHeight(x: number, z: number): number;
   onSkip(p: Vector3, v: Vector3, index: number): void;
   onPlunge(p: Vector3, v: Vector3): void;
+  /** Called now and then while a stone sinks, to trail bubbles. */
+  onSink(p: Vector3): void;
   onLand(p: Vector3, v: Vector3): void;
 }
 
@@ -42,7 +44,7 @@ export class Stones {
   constructor(scene: Scene, host: StoneHost) {
     this.scene = scene;
     this.host = host;
-    const tints = [new Color(0.32, 0.31, 0.3), new Color(0.42, 0.39, 0.35), new Color(0.26, 0.27, 0.28)];
+    const tints = [new Color(0.17, 0.165, 0.16), new Color(0.22, 0.2, 0.18), new Color(0.14, 0.145, 0.15)];
     this.geos = [11, 23, 37].map((s, i) => setGeometryColor(createRockGeometry(s, 1, 0.42), tints[i]));
     this.material = createLitMaterial({ kind: 'rock' });
   }
@@ -51,7 +53,7 @@ export class Stones {
     if (this.stones.length >= MAX_STONES) this.remove(this.stones[0]);
     const r = this.rnd;
     const mesh = new Mesh(this.geos[Math.floor(r() * this.geos.length)], this.material);
-    const s = 0.05 + r() * 0.025;
+    const s = 0.07 + r() * 0.03;
     mesh.scale.set(s, s, s);
     mesh.position.copy(origin);
     this.scene.add(mesh);
@@ -135,6 +137,7 @@ export class Stones {
       s.pos.y = ty + 0.03;
       s.vel.set(0, 0, 0);
     }
+    if (s.age < 2.5 && s.pos.y < -0.05 && Math.random() < dt * 9) this.host.onSink(s.pos);
     if (s.age > 9) this.remove(s);
   }
 

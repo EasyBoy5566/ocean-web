@@ -1,7 +1,8 @@
 import {
   HalfFloatType, LinearFilter, Matrix4, PerspectiveCamera, Plane, UnsignedByteType, Vector3, Vector4,
-  WebGLRenderTarget, type Camera, type Object3D, type Scene, type WebGLRenderer,
+  WebGLRenderTarget, type Camera, type Scene, type WebGLRenderer,
 } from 'three';
+import { LAYER_REFLECTED, LAYER_SCENE } from './composite';
 import { globals } from './globals';
 
 const normal = new Vector3(0, 1, 0);
@@ -42,7 +43,8 @@ export class PlanarReflection {
     if (this.target.width !== w || this.target.height !== h) this.target.setSize(w, h);
   }
 
-  render(renderer: WebGLRenderer, scene: Scene, camera: PerspectiveCamera, planeY: number, hidden: Object3D[]) {
+  /** Mirrors layer 0 (scene) and layer 2 (reflected effects); the water itself is never drawn. */
+  render(renderer: WebGLRenderer, scene: Scene, camera: PerspectiveCamera, planeY: number) {
     planePoint.set(0, planeY, 0);
     camPos.setFromMatrixPosition(camera.matrixWorld);
     if (camPos.y <= planeY) return;
@@ -79,8 +81,8 @@ export class PlanarReflection {
     e[10] = clip.z + 1 - 0.003;
     e[14] = clip.w;
 
-    const vis = hidden.map((o) => o.visible);
-    hidden.forEach((o) => (o.visible = false));
+    vc.layers.set(LAYER_SCENE);
+    vc.layers.enable(LAYER_REFLECTED);
     globals.uReflectionPass.value = 1;
     const prev = renderer.getRenderTarget();
     renderer.setRenderTarget(this.target);
@@ -88,7 +90,6 @@ export class PlanarReflection {
     renderer.render(scene, vc as Camera as PerspectiveCamera);
     renderer.setRenderTarget(prev);
     globals.uReflectionPass.value = 0;
-    hidden.forEach((o, i) => (o.visible = vis[i]));
   }
 
   dispose() {

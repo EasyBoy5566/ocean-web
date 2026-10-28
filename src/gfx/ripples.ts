@@ -123,9 +123,12 @@ export class RippleSim {
             vec4 dp = uDrops[i];
             float r = max(dp.z, s * 1.6);
             vec2 dv = wp - dp.xy;
-            float g = exp(-dot(dv, dv) / (r * r));
-            hn -= dp.w * g;
-            foam += g * min(abs(dp.w) * 40.0, 1.0);
+            float q = dot(dv, dv) / (r * r);
+            float g = exp(-q);
+            // a crater with a raised rim (Ricker profile) sets off a train of rings, not a single bump
+            hn -= dp.w * (1.0 - q) * g;
+            // churned bubbles only where the impact was hard (stones), barely for a fingertip
+            foam += exp(-q * 2.5) * clamp((abs(dp.w) - 0.008) * 18.0, 0.0, 0.7);
           }
           float edge = smoothstep(0.0, 0.04, uv.x) * smoothstep(1.0, 0.96, uv.x) * smoothstep(1.0, 0.94, uv.y) * smoothstep(0.0, 0.02, uv.y);
           hn *= mix(0.9, 1.0, edge);

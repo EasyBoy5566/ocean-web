@@ -201,7 +201,7 @@ export class OceanWorld extends World {
         const at = new Vector3(p.x + (this.rnd() - 0.5) * 2, h, p.z + 1.5);
         this.splash.emit(at, {
           count: Math.round(lerp(12, 40, e)), speed: [0.3, 1.6], up: [1.5 * e, 4.5 * e], radius: 1.2,
-          size: [0.03, 0.09], life: [0.8, 1.6],
+          size: [0.006, 0.03], life: [0.8, 1.6],
         });
         if (this.sim?.covers(at.x, at.z)) this.sim.addDrop(at.x, at.z, 0.6, 0.004);
         if (this.rnd() < 0.3) this.deps.sound.splash('plunge', at, e * 0.6);

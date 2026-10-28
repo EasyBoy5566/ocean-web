@@ -166,6 +166,25 @@ vec3 hemiAmbient(vec3 n) {
 }
 `;
 
+/**
+ * Vertex-stage helper: where an underwater point appears to the eye. Refraction
+ * at the surface makes water look shallower than it is (about 1/1.33 looking
+ * straight down, roughly half at the oblique angles of this view). Only the
+ * drawn position moves; shading still uses the true position.
+ */
+export const APPARENT = /* glsl */ `
+uniform float uWaterLevel;
+uniform float uReflectionPass;
+vec3 apparentPosition(vec3 wp) {
+  if (wp.y >= uWaterLevel || uReflectionPass > 0.5 || cameraPosition.y <= uWaterLevel) return wp;
+  float depth = uWaterLevel - wp.y;
+  vec3 ray = wp - cameraPosition;
+  float sinA = length(ray.xz) / length(ray);
+  float k = sqrt(max(1.0 - sinA * sinA, 0.0)) / sqrt(max(1.769 - sinA * sinA, 1e-3));
+  return vec3(wp.x, uWaterLevel - depth * k, wp.z);
+}
+`;
+
 export const OUTPUT = /* glsl */ `
 #include <tonemapping_fragment>
 #include <colorspace_fragment>

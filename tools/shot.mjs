@@ -32,11 +32,21 @@ if (process.env.CLICK) {
     await new Promise((r) => setTimeout(r, 700));
   }
 }
+// SEQ="150,450,1500": extra screenshots this many ms after the tap/flick
+const seq = (process.env.SEQ ?? '').split(',').filter(Boolean).map(Number);
+const sequence = async () => {
+  let t = 0;
+  for (const at of seq) {
+    await new Promise((r) => setTimeout(r, Math.max(0, at - t)));
+    t = at;
+    await page.screenshot({ path: `tools/shots/${name}-${at}.png` });
+  }
+};
 if (process.env.TAP) {
   // tap on the water: fractions of the viewport
   const [fx, fy] = process.env.TAP.split(',').map(Number);
   await page.mouse.click(Number(w) * fx, Number(h) * fy);
-  await new Promise((r) => setTimeout(r, 250));
+  await sequence();
 }
 if (process.env.FLICK) {
   const [fx, fy, len, ms] = process.env.FLICK.split(',').map(Number);
@@ -49,7 +59,7 @@ if (process.env.FLICK) {
     await new Promise((r) => setTimeout(r, ms / steps));
   }
   await page.mouse.up();
-  await new Promise((r) => setTimeout(r, 600));
+  await sequence();
 }
 await new Promise((r) => setTimeout(r, Number(wait)));
 const info = await page.evaluate(() => {

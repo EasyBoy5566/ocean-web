@@ -1,5 +1,6 @@
 import { AdditiveBlending, BufferGeometry, Float32BufferAttribute, Points, ShaderMaterial } from 'three';
 import { mulberry32 } from '../util/math';
+import { LAYER_REFLECTED, LAYER_SURFACE } from './composite';
 import { GLOBALS, OUTPUT } from './glsl';
 import { globals } from './globals';
 
@@ -58,6 +59,9 @@ export class Fireflies {
     this.points = new Points(geo, this.material);
     this.points.frustumCulled = false;
     this.points.renderOrder = 30;
+    // drawn over the water (they never write depth) and mirrored in it
+    this.points.layers.set(LAYER_SURFACE);
+    this.points.layers.enable(LAYER_REFLECTED);
   }
 
   update(night: number, pixelScale: number) {
