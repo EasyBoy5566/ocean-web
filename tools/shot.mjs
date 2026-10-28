@@ -19,12 +19,37 @@ await page.setViewport({ width: Number(w), height: Number(h), deviceScaleFactor:
 const logs = [];
 page.on('console', (m) => logs.push(`[${m.type()}] ${m.text()}`));
 page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
-const url = `${base}?shot&lat=25.03&lon=121.56&${query}`;
+const url = `${base}?${process.env.UI ? '' : 'shot&'}lat=25.03&lon=121.56&${query}`;
 await page.goto(url, { waitUntil: 'load' });
 try {
   await page.waitForFunction('window.__ready === true', { timeout: 60000 });
 } catch {
   logs.push('[timeout] app never became ready');
+}
+if (process.env.CLICK) {
+  for (const sel of process.env.CLICK.split('|')) {
+    await page.click(sel).catch((e) => logs.push(`[click] ${sel}: ${e.message}`));
+    await new Promise((r) => setTimeout(r, 700));
+  }
+}
+if (process.env.TAP) {
+  // tap on the water: fractions of the viewport
+  const [fx, fy] = process.env.TAP.split(',').map(Number);
+  await page.mouse.click(Number(w) * fx, Number(h) * fy);
+  await new Promise((r) => setTimeout(r, 250));
+}
+if (process.env.FLICK) {
+  const [fx, fy, len, ms] = process.env.FLICK.split(',').map(Number);
+  const x = Number(w) * fx, y = Number(h) * fy;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  const steps = 6;
+  for (let i = 1; i <= steps; i++) {
+    await page.mouse.move(x, y - (len * i) / steps);
+    await new Promise((r) => setTimeout(r, ms / steps));
+  }
+  await page.mouse.up();
+  await new Promise((r) => setTimeout(r, 600));
 }
 await new Promise((r) => setTimeout(r, Number(wait)));
 const info = await page.evaluate(() => {

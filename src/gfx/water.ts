@@ -224,7 +224,8 @@ void main() {
   float rough = clamp(uRough + uRoughFar * smoothstep(15.0, 3000.0, dist), 0.02, 0.6);
   vec3 spec = uSunColor * specGGX(n, V, uSunDir, rough) + uMoonColor * specGGX(n, V, uMoonDir, rough * 1.3);
 
-  float foam = simFoam * 0.8;
+  float bubbles = texture2D(uNoiseTex, vWorld.xz * 1.7 + fract(uTime * 0.05)).b;
+  float foam = simFoam * smoothstep(0.25, 0.75, bubbles + simFoam * 0.3) * 0.9;
 #ifdef OCEAN
   // whitecaps only where a steep crest coincides with a gust patch
   float crest = smoothstep(0.7, 1.0, vCrest / max(uSteep, 1e-3));
@@ -245,7 +246,7 @@ void main() {
   float fb = texture2D(uNoiseTex, (vWorld.xz - flow * fract(p0 + 0.5) * 2.0) * 0.45 + 0.5).b;
   float churn = mix(fb, fa, w0);
   foam += smoothstep(0.25, 0.75, wd.a * (0.55 + 0.9 * churn)) * 0.95;
-  foam += (1.0 - smoothstep(0.0, 0.12, depth)) * 0.35 * churn;
+  foam += (1.0 - smoothstep(0.0, 0.08, depth)) * 0.12 * churn;
 #endif
 #ifdef LAKE
   foam += (1.0 - smoothstep(0.0, 0.08, depth)) * 0.25 * texture2D(uNoiseTex, vWorld.xz * 0.3).b * uShoreFoam;

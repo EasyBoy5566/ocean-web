@@ -133,7 +133,7 @@ export class Splash {
   /** Splash presets. `energy` is roughly 0..1. */
   burst(kind: 'tap' | 'plunge' | 'skip', p: Vector3, energy = 0.5, dir?: Vector3) {
     if (kind === 'tap') {
-      this.emit(p, { count: 26, speed: [0.3, 1.4], up: [1.2, 3.0], radius: 0.06, size: [0.008, 0.02], life: [0.6, 1.1] });
+      this.emit(p, { count: 30, speed: [0.3, 1.4], up: [1.2, 3.0], radius: 0.06, size: [0.012, 0.03], life: [0.6, 1.1] });
       this.emit(p, { count: 10, speed: [0.05, 0.3], up: [2.2, 3.6], radius: 0.02, size: [0.012, 0.024], life: [0.8, 1.2], delay: 0.12 });
     } else if (kind === 'plunge') {
       const e = 0.6 + energy;

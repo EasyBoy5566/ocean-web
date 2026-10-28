@@ -117,7 +117,7 @@ export class RippleSim {
           float damp = 0.993;
           float hn = h + (h - hp) * damp + k * (hl + hr + hd + hu - 4.0 * h);
           hn *= 0.9993;
-          float foam = c.b * 0.985;
+          float foam = c.b * 0.978;
           for (int i = 0; i < ${MAX_DROPS}; i++) {
             if (i >= uDropCount) break;
             vec4 dp = uDrops[i];

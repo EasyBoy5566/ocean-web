@@ -26,7 +26,7 @@ export const VIEW_EXTINCTION = 0.5;
 /** Moonlight relative to sunlight. Exaggerated (real ≈ 2.5e-6) so moonlit nights read. */
 export const MOON_SCALE = 2.2e-4;
 /** Airglow + starlight floor so moonless nights are not pure black. */
-export const NIGHT_BASE: readonly [number, number, number] = [1.5e-6, 2.8e-6, 6e-6];
+export const NIGHT_BASE: readonly [number, number, number] = [4e-6, 7.5e-6, 1.6e-5];
 
 export type Vec3 = { x: number; y: number; z: number };
 export type RGB = [number, number, number];

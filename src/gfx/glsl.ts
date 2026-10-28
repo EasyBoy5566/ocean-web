@@ -161,7 +161,8 @@ float caustics(vec2 xz, float depth) {
 }
 
 vec3 hemiAmbient(vec3 n) {
-  return mix(uGroundAmbient, uSkyAmbient, n.y * 0.5 + 0.5);
+  // At night eyes adapt more than a camera would: lift surfaces a little so the land still reads.
+  return mix(uGroundAmbient, uSkyAmbient, n.y * 0.5 + 0.5) * (1.0 + 4.0 * uNight);
 }
 `;
 

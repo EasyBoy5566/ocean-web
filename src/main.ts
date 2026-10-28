@@ -1,11 +1,47 @@
 import './styles.css';
-import { App } from './app/app';
+import { App, SCENES } from './app/app';
 import { params } from './app/params';
+import { Hud } from './ui/hud';
+import { t } from './ui/i18n';
 import type { SceneId } from './world/world';
 
-const canvas = document.getElementById('scene') as HTMLCanvasElement;
-const app = new App(canvas);
-const scene = (params.scene === 'ocean' || params.scene === 'river' ? params.scene : 'lake') as SceneId;
-app.loadScene(scene);
-void app.locate();
-app.start();
+function pickScene(): SceneId {
+  const fromHash = location.hash.replace('#', '');
+  const want = params.scene ?? fromHash;
+  return (SCENES as string[]).includes(want) ? (want as SceneId) : 'lake';
+}
+
+function fatal(message: string) {
+  const div = document.createElement('div');
+  div.className = 'fatal';
+  div.textContent = message;
+  document.body.append(div);
+}
+
+function boot() {
+  const canvas = document.getElementById('scene') as HTMLCanvasElement;
+  const probe = document.createElement('canvas').getContext('webgl2');
+  if (!probe) {
+    fatal(t('webgl'));
+    return;
+  }
+  let app: App;
+  try {
+    app = new App(canvas);
+  } catch (e) {
+    console.error(e);
+    fatal(t('webgl'));
+    return;
+  }
+  const hud = new Hud(app, document.getElementById('ui')!);
+  app.loadScene(pickScene());
+  app.start();
+  void app.locate();
+  if (params.autostart) hud.autostart();
+  window.addEventListener('hashchange', () => {
+    const id = pickScene();
+    if (id !== app.sceneId) void app.switchScene(id, hud.fadeEl);
+  });
+}
+
+boot();

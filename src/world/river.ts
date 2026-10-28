@@ -149,9 +149,6 @@ export class RiverWorld extends World {
       const wake = a > 0 ? Math.exp(-reach * reach * 1.4) * Math.exp(-a / (b.r * 3.2)) : 0;
       f = Math.max(f, ring * 0.9 + wake * 0.75);
     }
-    const hw = this.halfWidth(z);
-    const edge = Math.abs(x - this.centre(z)) / hw;
-    f = Math.max(f, smoothstep(0.82, 1.0, edge) * 0.25);
     return f;
   }
 

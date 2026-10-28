@@ -340,7 +340,7 @@ export abstract class World {
     const dist = p.distanceTo(this.camera.position);
     const scale = clamp(dist / 12, 1, 6);
     this.splash.burst('tap', p, 0.5);
-    this.sim?.addDrop(p.x, p.z, 0.05 * scale, 0.006 + 0.0015 * scale);
+    this.sim?.addDrop(p.x, p.z, 0.06 * scale, 0.011 + 0.003 * scale);
     this.deps.sound.splash('tap', p, 0.5);
     return true;
   }
