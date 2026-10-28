@@ -263,7 +263,8 @@ export class SkyDome {
           }
           vec4 cl = cloudLayer(d, col);
           col = mix(col, cl.rgb, cl.a);
-          gl_FragColor = vec4(col, 1.0);
+          // In the reflection pass alpha 0 marks 'sky' so open water can use its own sky reflection.
+          gl_FragColor = vec4(col, uReflectionPass > 0.5 ? 0.0 : 1.0);
           ${OUTPUT}
         }
       `,

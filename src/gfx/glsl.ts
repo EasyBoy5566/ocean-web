@@ -130,7 +130,14 @@ float fogAmount(vec3 worldPos, float dist) {
 vec3 applyFog(vec3 col, vec3 worldPos) {
   vec3 v = worldPos - cameraPosition;
   float dist = length(v);
-  return mix(col, hazeColor(v / dist), fogAmount(worldPos, dist));
+  vec3 dir = v / dist;
+  // Under water only the part of the ray that travels through air gathers haze.
+  if (worldPos.y < uWaterLevel && cameraPosition.y > uWaterLevel) {
+    float k = (cameraPosition.y - uWaterLevel) / (cameraPosition.y - worldPos.y);
+    dist *= k;
+    worldPos = cameraPosition + v * k;
+  }
+  return mix(col, hazeColor(dir), fogAmount(worldPos, dist));
 }
 
 /** Tint for anything below the water surface: absorption along light + view paths, plus in-scatter. */

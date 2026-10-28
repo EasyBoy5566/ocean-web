@@ -79,7 +79,7 @@ export function createBroadleafGeometry(seed: number): BufferGeometry {
   const blobs = 4 + Math.floor(rnd() * 3);
   for (let i = 0; i < blobs; i++) {
     const r = 0.13 + rnd() * 0.1;
-    const blob = new IcosahedronGeometry(r, 1);
+    const blob = new IcosahedronGeometry(r, 2);
     const p = blob.attributes.position;
     for (let k = 0; k < p.count; k++) {
       const x = p.getX(k), y = p.getY(k), z = p.getZ(k);

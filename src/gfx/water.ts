@@ -200,22 +200,38 @@ void main() {
   float simFoam;
   slope += simSlope(vWorld.xz, simFoam);
   vec3 n = normalize(vec3(-slope.x, 1.0, -slope.y));
+  // Keep normals from facing away from the eye (back sides of crests would mirror the horizon as hard lines).
+  n = normalize(n + V * max(0.0, 0.25 - dot(n, V)));
 
   float NdV = max(dot(n, V), 0.0);
   float F = 0.02 + 0.98 * pow(1.0 - NdV, 5.0);
 
   vec2 rc = vRefl.xy / vRefl.w + slope * uReflDistort / (1.0 + dist * 0.04);
-  vec3 refl = texture2D(uReflTex, clamp(rc, 0.001, 0.999)).rgb * uReflStrength;
+  vec4 planar = texture2D(uReflTex, clamp(rc, 0.001, 0.999));
+  vec3 refl = planar.rgb * uReflStrength;
 
+#ifdef OCEAN
+  // Open sea: reflect the sky along the true reflected ray (planar alpha marks real objects).
+  // Rays reflected downwards hit the next wave, so they see water rather than horizon.
+  // Far away the rough surface averages a band of sky above the horizon.
+  vec3 R = reflect(-V, n);
+  float farR = smoothstep(60.0, 1400.0, dist);
+  vec3 Rs = normalize(vec3(R.x, max(R.y, 0.0) + 0.02 + 0.12 * farR, R.z));
+  float up = smoothstep(-0.05, 0.05, R.y);
+  vec3 skyR = skyColor(Rs) * up + uWaterScatter * waterLightIn() * 6.0 * (1.0 - up);
+  refl = mix(skyR, planar.rgb, planar.a) * uReflStrength;
+#endif
   float rough = clamp(uRough + uRoughFar * smoothstep(15.0, 3000.0, dist), 0.02, 0.6);
   vec3 spec = uSunColor * specGGX(n, V, uSunDir, rough) + uMoonColor * specGGX(n, V, uMoonDir, rough * 1.3);
 
   float foam = simFoam * 0.8;
 #ifdef OCEAN
-  float crest = smoothstep(0.55, 0.95, vCrest / max(uSteep, 1e-3));
-  float breakup = texture2D(uNoiseTex, vWorld.xz * 0.045 + fract(vec2(uTime * 0.004, uTime * 0.011))).b;
-  foam += crest * smoothstep(0.35, 0.75, breakup) * 0.9;
-  float shore = 1.0 - smoothstep(0.0, 2.2, depth);
+  // whitecaps only where a steep crest coincides with a gust patch
+  float crest = smoothstep(0.7, 1.0, vCrest / max(uSteep, 1e-3));
+  float gust = texture2D(uNoiseTex, vWorld.xz * 0.006 + fract(vec2(uTime * 0.002, uTime * 0.005))).a;
+  float breakup = texture2D(uNoiseTex, vWorld.xz * 0.05 + fract(vec2(uTime * 0.004, uTime * 0.011))).b;
+  foam += crest * smoothstep(0.55, 0.8, gust) * smoothstep(0.45, 0.8, breakup) * 0.8;
+  float shore = 1.0 - smoothstep(0.0, 1.4, depth);
   float bands = texture2D(uNoiseTex, vWorld.xz * 0.05).a;
   float surge = sin(depth * 3.2 - uTime * 1.3 + bands * 7.0) * 0.5 + 0.5;
   float lace = texture2D(uNoiseTex, vWorld.xz * 0.21 + vec2(0.0, uTime * 0.03)).b;
@@ -243,8 +259,8 @@ void main() {
   vec2 hv = normalize(-V.xz + vec2(1e-5));
   vec2 hs = normalize(uSunDir.xz + vec2(1e-5));
   float back = pow(clamp(dot(hv, hs), 0.0, 1.0), 3.0) * (1.0 - clamp(uSunDir.y, 0.0, 1.0));
-  float lift = clamp(vWorld.y * 0.9 + 0.35, 0.0, 1.0);
-  vec3 sss = uSSS * (uSunColor * back * 2.2 + uSkyAmbient * 0.35) * lift;
+  float lift = smoothstep(0.05, 0.9, vWorld.y);
+  vec3 sss = uSSS * (uSunColor * back * 1.2 + uSkyAmbient * 0.25) * lift;
   premul += sss * (1.0 - F);
 #endif
 

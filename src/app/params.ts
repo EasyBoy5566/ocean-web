@@ -24,4 +24,6 @@ export const params = {
   speed: num('speed'),
   /** Debug multiplier for fog and mist. */
   fog: num('fog'),
+  /** Debug switches, comma separated: norefl, nosplash, noprops. */
+  dbg: new Set((q.get('dbg') ?? '').split(',').filter(Boolean)),
 };

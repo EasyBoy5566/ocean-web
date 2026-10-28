@@ -79,7 +79,7 @@ export function createTerrainMaterial(c: TerrainColors) {
         vec3 light = uSunColor * diff * mix(1.0, ao, 0.5) + uMoonColor * diffM + hemiAmbient(n) * ao;
         vec3 col = alb * light;
         if (vWorld.y < uWaterLevel) {
-          col += alb * uSunColor * caustics(xz, uWaterLevel - vWorld.y) * max(uSunDir.y, 0.0) * 2.0;
+          col += alb * uSunColor * caustics(xz, uWaterLevel - vWorld.y) * max(uSunDir.y, 0.0) * 0.6;
         }
         col = applyUnderwater(col, vWorld);
         col = applyFog(col, vWorld);
@@ -193,7 +193,7 @@ export function createLitMaterial(o: LitOptions) {
       #endif
         vec3 col = alb * light;
         if (vWorld.y < uWaterLevel) {
-          col += alb * uSunColor * caustics(vWorld.xz, uWaterLevel - vWorld.y) * max(uSunDir.y, 0.0) * 2.0;
+          col += alb * uSunColor * caustics(vWorld.xz, uWaterLevel - vWorld.y) * max(uSunDir.y, 0.0) * 0.6;
         }
         col = applyUnderwater(col, vWorld);
         col = applyFog(col, vWorld);

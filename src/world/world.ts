@@ -2,6 +2,7 @@ import {
   BufferAttribute, Color, Float32BufferAttribute, Mesh, PerspectiveCamera, Raycaster, Scene, Vector2, Vector3, Vector4,
   type DataTexture, type Object3D, type ShaderMaterial, type Texture, type WebGLRenderer,
 } from 'three';
+import { params } from '../app/params';
 import type { TierSettings } from '../app/quality';
 import type { Environment, EnvironmentConfig } from '../env/environment';
 import { globals } from '../gfx/globals';
@@ -298,6 +299,15 @@ export abstract class World {
   }
 
   render(renderer: WebGLRenderer) {
+    if (params.dbg.has('nosplash')) this.splash.points.visible = false;
+    if (params.dbg.has('norefl')) this.waterMaterial.uniforms.uReflStrength.value = 0;
+    if (params.dbg.has('noterrain')) this.terrain.visible = false;
+    if (params.dbg.has('double')) this.waterMaterial.side = 2;
+    if (params.dbg.has('nospec')) this.waterMaterial.uniforms.uRough.value = 0.6;
+    if (params.dbg.has('nofoam')) { this.waterMaterial.uniforms.uSteep.value = 1e-6; this.waterMaterial.uniforms.uShoreFoam.value = 0; }
+    if (params.dbg.has('nosim')) this.waterMaterial.uniforms.uSimMap.value = new Vector4(1, 1, 1, 0);
+    if (params.dbg.has('nodata')) this.waterMaterial.uniforms.uDataBounds.value = new Vector4(1e6, 1e6, 1, 1);
+    if (params.dbg.has('noprops')) this.scene.children.forEach((c) => { if ((c as { isInstancedMesh?: boolean }).isInstancedMesh) c.visible = false; });
     this.reflection.render(renderer, this.scene, this.camera, 0, [this.water]);
     renderer.setRenderTarget(null);
     renderer.render(this.scene, this.camera);
