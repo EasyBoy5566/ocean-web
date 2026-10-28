@@ -1,7 +1,7 @@
 import { SCENES, type App } from '../app/app';
 import { params } from '../app/params';
 import { storedTierChoice, storeTierChoice, type Tier } from '../app/quality';
-import type { AudioEngine } from '../audio/engine';
+import { AudioEngine } from '../audio/engine';
 import { sunTimes } from '../env/celestial';
 import { requestPreciseLocation, type GeoLocation } from '../env/location';
 import type { SceneId } from '../world/world';
@@ -22,14 +22,11 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: 
 
 const fmtTime = (d: Date) => d.toLocaleTimeString(getLang() === 'zh' ? 'zh-TW' : 'en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
 
-const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
-
-/** All DOM UI: intro screen, scene tabs, clock and time slider, settings, hints. */
+/** All DOM UI: scene tabs, clock and time slider, settings, hints. */
 export class Hud {
   private app: App;
   private root: HTMLElement;
   private audio: AudioEngine | null = null;
-  private intro!: HTMLElement;
   private hud!: HTMLElement;
   private fade!: HTMLElement;
   private tabs = new Map<SceneId, HTMLButtonElement>();
@@ -61,6 +58,32 @@ export class Hud {
     app.events.onInteract = () => this.hideHint();
     app.events.onFrame = () => this.frame();
     window.addEventListener('pointerdown', () => this.wake(), { passive: true });
+    // Browsers only allow sound after the first touch, so start it then instead of asking.
+    const first = () => {
+      if (!this.audio && !this.prefersMuted) this.startAudio();
+      for (const ev of ['pointerup', 'touchend', 'keydown'] as const) window.removeEventListener(ev, first, true);
+    };
+    for (const ev of ['pointerup', 'touchend', 'keydown'] as const) window.addEventListener(ev, first, true);
+    if (!params.shot) {
+      this.showHint();
+      this.wake();
+    }
+  }
+
+  private get prefersMuted() {
+    try {
+      return localStorage.getItem('waterscape.muted') === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  private set prefersMuted(v: boolean) {
+    try {
+      localStorage.setItem('waterscape.muted', v ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
   }
 
   get fadeEl() {
@@ -78,7 +101,6 @@ export class Hud {
       else node.textContent = t(key);
     }
     this.lastClock = '';
-    this.renderLocation();
     this.renderSettings();
   }
 
@@ -86,32 +108,8 @@ export class Hud {
     this.fade = el('div', 'fade');
     this.root.append(this.fade);
 
-    // Intro
-    this.intro = el('div', 'intro');
-    const card = el('div', 'intro-card');
-    const lang = el('button', 'lang-toggle');
-    lang.addEventListener('click', () => setLang(getLang() === 'zh' ? 'en' : 'zh'));
-    this.texts.push({ node: lang, key: 'language', attr: 'aria-label' });
-    const updLang = () => (lang.textContent = getLang() === 'zh' ? 'EN' : '中文');
-    onLangChange(updLang);
-    updLang();
-    const title = this.label(el('h1', 'intro-title'), 'title');
-    const sub = this.label(el('p', 'intro-sub'), 'subtitle');
-    const loc = el('p', 'intro-loc');
-    loc.dataset.role = 'loc';
-    const b1 = this.label(el('button', 'btn primary'), 'enterSound');
-    const b2 = this.label(el('button', 'btn ghost'), 'enterMuted');
-    b1.addEventListener('click', () => this.enter(true));
-    b2.addEventListener('click', () => this.enter(false));
-    const btns = el('div', 'intro-btns');
-    btns.append(b1, b2);
-    card.append(title, sub, btns, loc);
-    if (isIOS) card.append(this.label(el('p', 'intro-note'), 'iosSilent'));
-    this.intro.append(lang, card);
-    this.root.append(this.intro);
-
     // HUD
-    this.hud = el('div', 'hud hidden');
+    this.hud = el('div', 'hud');
     const top = el('nav', 'tabs');
     for (const id of SCENES) {
       const b = this.label(el('button', 'tab'), id as Key) as HTMLButtonElement;
@@ -212,6 +210,7 @@ export class Hud {
     if (this.audio) {
       row('sound', seg<'on' | 'off'>([['on', t('on')], ['off', t('off')]], this.audio.isMuted ? 'off' : 'on', (v) => {
         this.audio?.setMuted(v === 'off');
+        this.prefersMuted = v === 'off';
         this.updateSoundIcon();
       }));
     }
@@ -245,44 +244,38 @@ export class Hud {
     this.settings.classList.add('open');
   }
 
-  private async enter(withSound: boolean) {
-    this.intro.classList.add('gone');
-    this.hud.classList.remove('hidden');
-    if (withSound) {
-      try {
-        const { AudioEngine } = await import('../audio/engine');
-        this.audio = new AudioEngine();
-        await this.audio.unlock();
-        this.audio.setScene(this.app.sceneId);
-        this.app.setSound(this.audio);
-        document.addEventListener('visibilitychange', () => {
-          if (document.hidden) this.audio?.suspend();
-          else this.audio?.resume();
-        });
-      } catch (e) {
-        console.warn('Audio unavailable', e);
-        this.audio = null;
-      }
+  /** Must run inside a user gesture: creates and unlocks the audio context synchronously. */
+  private startAudio() {
+    try {
+      this.audio = new AudioEngine();
+      void this.audio.unlock();
+      this.audio.setScene(this.app.sceneId);
+      this.app.setSound(this.audio);
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) this.audio?.suspend();
+        else this.audio?.resume();
+      });
+    } catch (e) {
+      console.warn('Audio unavailable', e);
+      this.audio = null;
     }
     this.updateSoundIcon();
     this.renderSettings();
-    this.showHint();
-    this.wake();
   }
 
-  /** Skip the intro (used by ?autostart and screenshots). */
+  /** Screenshot mode hides the interface entirely. */
   autostart() {
-    this.intro.classList.add('gone');
-    this.hud.classList.remove('hidden');
     if (params.shot) this.hud.classList.add('hidden');
   }
 
-  private async toggleSound() {
+  private toggleSound() {
     if (!this.audio) {
-      await this.enter(true);
+      this.prefersMuted = false;
+      this.startAudio();
       return;
     }
     this.audio.setMuted(!this.audio.isMuted);
+    this.prefersMuted = this.audio.isMuted;
     this.updateSoundIcon();
   }
 
@@ -327,13 +320,7 @@ export class Hud {
     const src: Record<GeoLocation['source'], Key> = { gps: 'locGps', ip: 'locIp', timezone: 'locTz', default: 'locDefault', param: 'locParam' };
     this.locStatus = `${loc.label ? `${loc.label} · ` : ''}${loc.lat.toFixed(2)}°, ${loc.lon.toFixed(2)}° — ${t(src[loc.source])}`;
     this.lastClock = '';
-    this.renderLocation();
     this.renderSettings();
-  }
-
-  private renderLocation() {
-    const node = this.root.querySelector<HTMLElement>('[data-role="loc"]');
-    if (node) node.textContent = this.locStatus;
   }
 
   private frame() {

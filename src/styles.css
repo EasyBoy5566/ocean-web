@@ -26,30 +26,9 @@ body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none
 .fade { position: absolute; inset: 0; background: #05080d; opacity: 0; transition: opacity 0.45s ease; pointer-events: none; }
 .fade.on { opacity: 1; }
 
-/* ---------- intro ---------- */
-.intro {
-  position: absolute; inset: 0; display: grid; place-items: end center; pointer-events: auto;
-  background: linear-gradient(to top, rgba(4, 8, 14, 0.82) 0%, rgba(4, 8, 14, 0.35) 45%, rgba(4, 8, 14, 0) 75%);
-  transition: opacity 0.9s ease, visibility 0.9s;
-  padding: 0 16px calc(48px + var(--safe-b));
-}
-.intro.gone { opacity: 0; visibility: hidden; pointer-events: none; }
-.intro-card { max-width: 420px; width: 100%; text-align: center; }
-.intro-title { margin: 0; font-size: clamp(44px, 12vw, 64px); font-weight: 300; letter-spacing: 0.18em; text-indent: 0.18em; text-shadow: 0 2px 24px rgba(0, 0, 0, 0.35); }
-.intro-sub { margin: 10px auto 28px; max-width: 30ch; color: var(--ink-2); font-size: 15px; line-height: 1.6; }
-.intro-btns { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
-.intro-loc { margin: 18px 0 0; color: var(--ink-3); font-size: 12px; min-height: 1.4em; }
-.intro-note { margin: 6px 0 0; color: var(--ink-3); font-size: 12px; }
-.lang-toggle {
-  position: absolute; top: calc(14px + var(--safe-t)); right: calc(14px + var(--safe-r));
-  padding: 8px 14px; border-radius: 999px; background: var(--glass) !important; border: 1px solid var(--line) !important;
-  font-size: 13px; letter-spacing: 0.05em;
-}
-
 .btn { padding: 14px 20px; border-radius: 999px; font-size: 16px; letter-spacing: 0.04em; transition: transform 0.15s ease, background 0.2s; }
 .btn:active { transform: scale(0.98); }
 .btn.primary { background: rgba(244, 247, 250, 0.92) !important; color: #0b1622 !important; font-weight: 600; }
-.btn.ghost { background: var(--glass) !important; border: 1px solid var(--line) !important; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 .btn.small { padding: 10px 18px; font-size: 15px; margin-top: 14px; align-self: center; }
 
 /* ---------- hud ---------- */
@@ -128,7 +107,7 @@ body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none
 .fatal { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--ink-2); line-height: 1.7; background: #0b1622; }
 
 @media (prefers-reduced-motion: reduce) {
-  .intro, .hud, .hint, .sheet-panel, .fade { transition: none; }
+  .hud, .hint, .sheet-panel, .fade { transition: none; }
 }
 
 @media (min-width: 900px) {

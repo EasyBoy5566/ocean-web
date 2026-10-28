@@ -2,14 +2,6 @@ export type Lang = 'zh' | 'en';
 
 const dict = {
   title: { zh: '水境', en: 'Waterscapes' },
-  subtitle: {
-    zh: '隨著你頭頂真實的天空變化的海洋、湖泊與河流',
-    en: 'An ocean, a lake and a river under your real sky',
-  },
-  enterSound: { zh: '開啟聲音進入', en: 'Enter with sound' },
-  enterMuted: { zh: '靜音進入', en: 'Enter muted' },
-  iosSilent: { zh: 'iPhone 請關閉側邊的靜音開關以聽到聲音', en: 'On iPhone, turn off silent mode to hear sound' },
-  loading: { zh: '正在準備場景…', en: 'Preparing the scene…' },
   lake: { zh: '湖泊', en: 'Lake' },
   ocean: { zh: '海洋', en: 'Ocean' },
   river: { zh: '河流', en: 'River' },
