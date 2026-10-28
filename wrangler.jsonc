@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Must match the Worker's name in the Cloudflare dashboard.
+  "name": "ocean-web",
+  "main": "worker/index.js",
+  "compatibility_date": "2025-09-01",
+  // Builds the site before every deploy, so `npx wrangler deploy` alone is enough.
+  "build": { "command": "npm run build" },
+  "assets": { "directory": "./dist", "binding": "ASSETS" },
+  "observability": { "enabled": true }
+}

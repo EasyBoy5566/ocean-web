@@ -26,7 +26,7 @@ Tap the water to splash, swipe up to throw a stone, flick fast and flat to skip 
 ## Location and privacy
 
 By default the location is estimated from the visitor's network by Cloudflare
-(`functions/api/geo.js`), falling back to the time zone. Visitors can opt in to
+(`worker/index.js`, `/api/geo`), falling back to the time zone. Visitors can opt in to
 precise location in Settings. The location is only used to place the sun, moon and
 stars; it is not stored on any server.
 
@@ -47,15 +47,10 @@ Handy URL parameters: `?scene=ocean&time=18:40&date=2026-06-21&lat=25.03&lon=121
 node tools/shot.mjs ocean-sunset "scene=ocean&time=17:10" 390 844 2
 ```
 
-## Deploy (Cloudflare Pages)
+## Deploy (Cloudflare Workers)
 
-Connect this repository in Cloudflare Pages with:
-
-| Setting | Value |
-|---|---|
-| Framework preset | None (or Vite) |
-| Build command | `npm run build` |
-| Build output directory | `dist` |
-| Node version | from `.nvmrc` (22) |
-
-The `functions/` directory is deployed automatically as Pages Functions.
+The site deploys as a Worker with static assets (`wrangler.jsonc`): the built
+`dist/` folder is served as assets and `worker/index.js` answers `/api/geo`.
+`npx wrangler deploy` runs `npm run build` itself, so a Git-connected Worker needs
+no extra settings. The `name` in `wrangler.jsonc` must match the Worker's name in
+the Cloudflare dashboard.
