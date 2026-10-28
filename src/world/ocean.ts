@@ -1,22 +1,20 @@
 import { Color, Vector3, Vector4 } from 'three';
 import { createLitMaterial } from '../gfx/materials';
 import { createBroadleafGeometry, createInstances, createRockGeometry, type Placement } from '../gfx/props';
-import { oceanHeight, type Wave } from '../gfx/water';
+import type { SeaState } from '../gfx/ocean';
 import { clamp, lerp, mulberry32, smoothstep } from '../util/math';
 import { Noise2D } from '../util/noise';
 import { rgb, World, type WorldConfig } from './world';
 
-const WAVES: Wave[] = [
-  { dir: [0.22, 1], amplitude: 0.46, wavelength: 47 },
-  { dir: [-0.42, 1], amplitude: 0.36, wavelength: 31 },
-  { dir: [0.75, 1], amplitude: 0.24, wavelength: 21 },
-  { dir: [-0.95, 1], amplitude: 0.15, wavelength: 13 },
-  { dir: [1, 0.55], amplitude: 0.09, wavelength: 8.1 },
-  { dir: [-0.15, 1], amplitude: 0.06, wavelength: 5.3 },
-  { dir: [1, -0.25], amplitude: 0.035, wavelength: 3.1 },
-  { dir: [-1, 0.35], amplitude: 0.022, wavelength: 1.9 },
-];
-const STEEPNESS = 0.6;
+const SEA: SeaState = {
+  windSpeed: 10.5,
+  windDir: [0.3, 1],
+  fetch: 90000,
+  swellHeight: 1.1,
+  swellPeriod: 10.5,
+  swellDir: [0.08, 1],
+  choppiness: 1.3,
+};
 
 function distToSegment(px: number, pz: number, ax: number, az: number, bx: number, bz: number) {
   const vx = bx - ax, vz = bz - az;
@@ -53,9 +51,9 @@ export class OceanWorld extends World {
       camera: { eyeY: 5.25, vfovPortrait: 70, vfovLandscape: 45, horizonPortrait: 0.38, horizonLandscape: 0.2 },
       water: {
         mode: 'ocean',
-        absorb: [0.6, 0.2, 0.14],
+        absorb: [0.7, 0.3, 0.2],
         scatter: [0.0022, 0.0085, 0.0135],
-        detail: 0.11,
+        detail: 0.03,
         detailScale: [0.055, 0.16],
         detailSpeed: 0.05,
         roughness: 0.05,
@@ -64,8 +62,7 @@ export class OceanWorld extends World {
         reflectionStrength: 1,
         shoreFoam: 1,
         sss: [0.03, 0.3, 0.26],
-        waves: WAVES,
-        steepness: STEEPNESS,
+        sea: SEA,
         far: 14000,
       },
       terrain: {
@@ -125,7 +122,9 @@ export class OceanWorld extends World {
   }
 
   waterHeight(x: number, z: number): number {
-    return oceanHeight(WAVES, STEEPNESS, x, z, this.time);
+    const h = this.ocean ? this.ocean.heightAt(x, z, this.time) : 0;
+    // same damping over shallows as the shader
+    return h * smoothstep(0.6, 9, -this.terrainHeight(x, z));
   }
 
   protected paint(x: number, y: number, z: number, ny: number): [number, number, number, number] {
@@ -145,7 +144,7 @@ export class OceanWorld extends World {
     const stackGeo = this.track(createRockGeometry(41, 3, 1));
     this.add(createInstances(stackGeo, rockMat, this.stacks.map((s, i) => ({
       x: s.x, y: s.h * 0.4 - 2.5, z: s.z, scale: [s.r * 0.95, s.h * 0.66, s.r * 0.9], rotY: i * 1.7,
-      color: new Color(0.17, 0.155, 0.14),
+      color: new Color(0.1, 0.095, 0.088),
     }))));
 
     // Boulders on the shore and in the surf.

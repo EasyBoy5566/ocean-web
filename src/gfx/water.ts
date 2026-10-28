@@ -7,13 +7,6 @@ import { WATER_SLOPE_SCALE } from './textures';
 
 export type WaterMode = 'lake' | 'ocean' | 'river';
 
-export interface Wave {
-  /** Direction of travel in world XZ (normalised internally). */
-  dir: [number, number];
-  amplitude: number;
-  wavelength: number;
-}
-
 export interface WaterOptions {
   mode: WaterMode;
   normalTex: Texture;
@@ -32,54 +25,69 @@ export interface WaterOptions {
   reflectionStrength: number;
   shoreFoam: number;
   sss: [number, number, number];
-  waves?: Wave[];
-  steepness?: number;
+  /** Spectral ocean cascades (ocean mode only). */
+  fft?: { disp: Texture[]; deriv: Texture[]; lengths: Vector3; size: number };
   grid: { cols: number; rows: number; near: number; far: number; halfWidth: number };
 }
 
-export const MAX_WAVES = 8;
+/** Shared by both stages: depth, flow and foam facts baked per scene. */
+const WATER_DATA = /* glsl */ `
+uniform sampler2D uDataTex;
+uniform vec4 uDataBounds;
+uniform float uDepthMax;
+vec4 waterData(vec2 xz) {
+  vec2 uv = (xz - uDataBounds.xy) / uDataBounds.zw;
+  if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return vec4(1.0, 0.5, 0.5, 0.0);
+  return texture2D(uDataTex, uv);
+}
+`;
+
+/** Ocean cascades: displacement in the vertex stage, slopes and foam per pixel. */
+const OCEAN_FFT = /* glsl */ `
+uniform sampler2D uDisp0;
+uniform sampler2D uDisp1;
+uniform sampler2D uDisp2;
+uniform sampler2D uDeriv0;
+uniform sampler2D uDeriv1;
+uniform sampler2D uDeriv2;
+uniform vec3 uLengths;
+uniform float uOceanN;
+vec2 cascadeUV(vec2 xz, float L) { return xz / L + 0.5 / uOceanN; }
+// big swells fade where the sea floor rises, so waves die on the rocks instead of passing through
+float shoreDamp(vec2 xz) { return smoothstep(0.6, 9.0, waterData(xz).r * uDepthMax); }
+`;
 
 export const WATER_VERT = /* glsl */ `
 ${GLOBALS}
+${WATER_DATA}
 uniform mat4 uReflMatrix;
 #ifdef OCEAN
-uniform vec4 uWaves[${MAX_WAVES}];
-uniform float uSteep;
+${OCEAN_FFT}
 #endif
 varying vec3 vWorld;
 varying vec4 vRefl;
 varying vec3 vNrm;
 varying float vCrest;
+varying vec2 vUndisp;
 
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vNrm = vec3(0.0, 1.0, 0.0);
   vCrest = 0.0;
+  vUndisp = wp.xz;
 #ifdef OCEAN
   float dist = length(wp.xz - cameraPosition.xz);
-  vec3 disp = vec3(0.0);
-  float sx = 0.0, sz = 0.0, sy = 0.0;
-  for (int i = 0; i < ${MAX_WAVES}; i++) {
-    vec4 w = uWaves[i];
-    if (w.z <= 0.0) continue;
-    float k = 2.0 * PI / w.w;
-    float fade = 1.0 - smoothstep(w.w * 22.0, w.w * 70.0, dist);
-    float a = w.z * fade;
-    float omega = sqrt(9.81 * k);
-    float ph = k * dot(w.xy, wp.xz) - omega * uTime + float(i) * 1.93;
-    float s = sin(ph);
-    float c = cos(ph);
-    float Q = uSteep / (k * w.z * float(${MAX_WAVES}));
-    disp.x += Q * a * w.x * c;
-    disp.z += Q * a * w.y * c;
-    disp.y += a * s;
-    sx += w.x * k * a * c;
-    sz += w.y * k * a * c;
-    sy += Q * k * a * s;
-  }
-  wp.xyz += disp;
-  vNrm = normalize(vec3(-sx, 1.0 - sy, -sz));
-  vCrest = sy;
+  // filter each cascade to the grid spacing here, so far waves don't alias
+  float spacing = max(dist * 0.014, 0.01);
+  float damp = shoreDamp(wp.xz);
+  vec3 d = vec3(0.0);
+  d += textureLod(uDisp0, cascadeUV(wp.xz, uLengths.x), log2(max(spacing * uOceanN / uLengths.x, 1.0))).xyz * damp;
+  d += textureLod(uDisp1, cascadeUV(wp.xz, uLengths.y), log2(max(spacing * uOceanN / uLengths.y, 1.0))).xyz
+     * mix(0.5, 1.0, damp) * (1.0 - smoothstep(250.0, 700.0, dist));
+  d += textureLod(uDisp2, cascadeUV(wp.xz, uLengths.z), log2(max(spacing * uOceanN / uLengths.z, 1.0))).xyz
+     * (1.0 - smoothstep(25.0, 80.0, dist));
+  wp.xyz += d;
+  vCrest = d.y;
 #endif
   vWorld = wp.xyz;
   vRefl = uReflMatrix * vec4(wp.x, uWaterLevel, wp.z, 1.0);
@@ -100,15 +108,12 @@ uniform vec2 uWindDir;
 uniform sampler2D uSimTex;
 uniform vec4 uSimMap;
 uniform vec2 uSimSize;
-uniform sampler2D uDataTex;
-uniform vec4 uDataBounds;
-uniform float uDepthMax;
+${WATER_DATA}
 uniform float uFlowMax;
 uniform float uRough;
 uniform float uRoughFar;
 uniform float uShoreFoam;
 uniform vec3 uSSS;
-uniform float uSteep;
 uniform sampler2D uSceneColor;
 uniform sampler2D uSceneDepth;
 uniform vec2 uResolution;
@@ -118,14 +123,12 @@ varying vec3 vWorld;
 varying vec4 vRefl;
 varying vec3 vNrm;
 varying float vCrest;
+varying vec2 vUndisp;
+#ifdef OCEAN
+${OCEAN_FFT}
+#endif
 
 const float SLOPE_SCALE = ${WATER_SLOPE_SCALE.toFixed(4)};
-
-vec4 waterData(vec2 xz) {
-  vec2 uv = (xz - uDataBounds.xy) / uDataBounds.zw;
-  if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return vec4(1.0, 0.5, 0.5, 0.0);
-  return texture2D(uDataTex, uv);
-}
 
 vec2 tapSlope(vec2 uv) {
   return (texture2D(uNormalTex, uv).rg * 2.0 - 1.0) * SLOPE_SCALE;
@@ -199,6 +202,20 @@ void main() {
 
   vec3 gn = normalize(vNrm);
   vec2 slope = -gn.xz / gn.y;
+#ifdef OCEAN
+  // slopes from all cascades at the undisplaced point; mipmaps filter the far field
+  float dampF = shoreDamp(vUndisp);
+  vec4 g0 = texture2D(uDeriv0, cascadeUV(vUndisp, uLengths.x));
+  vec4 g1 = texture2D(uDeriv1, cascadeUV(vUndisp, uLengths.y));
+  vec4 g2 = texture2D(uDeriv2, cascadeUV(vUndisp, uLengths.z));
+  float d1 = mix(0.5, 1.0, dampF);
+  vec2 sl = g0.xy * dampF + g1.xy * d1 + g2.xy;
+  float jx = 1.0 + g0.z * dampF + g1.z * d1 + g2.z;
+  float jz = 1.0 + g0.w * dampF + g1.w * d1 + g2.w;
+  slope = sl / vec2(max(jx, 0.25), max(jz, 0.25));
+  float whitecap = texture2D(uDisp0, cascadeUV(vUndisp, uLengths.x)).w * dampF
+                 + texture2D(uDisp1, cascadeUV(vUndisp, uLengths.y)).w * 0.7;
+#endif
   float near = 1.0 / (1.0 + dist * 0.01);
   slope += detailSlope(vWorld.xz, flow) * mix(0.35, 1.0, near);
   float simFoam;
@@ -233,11 +250,9 @@ void main() {
   float b2 = texture2D(uNoiseTex, vWorld.xz * 9.3 - fract(uTime * 0.05)).b;
   float foam = simFoam * smoothstep(0.45, 0.8, b1 * 0.6 + b2 * 0.6 + simFoam * 0.25) * 0.85;
 #ifdef OCEAN
-  // whitecaps only where a steep crest coincides with a gust patch
-  float crest = smoothstep(0.7, 1.0, vCrest / max(uSteep, 1e-3));
-  float gust = texture2D(uNoiseTex, vWorld.xz * 0.006 + fract(vec2(uTime * 0.002, uTime * 0.005))).a;
-  float breakup = texture2D(uNoiseTex, vWorld.xz * 0.05 + fract(vec2(uTime * 0.004, uTime * 0.011))).b;
-  foam += crest * smoothstep(0.55, 0.8, gust) * smoothstep(0.45, 0.8, breakup) * 0.8;
+  // whitecaps come from the simulation itself: where the surface folds (Jacobian < 1)
+  float breakup = texture2D(uNoiseTex, vUndisp * 0.35 + fract(vec2(uTime * 0.01, uTime * 0.013))).b;
+  foam += smoothstep(0.12, 0.75, whitecap * (0.55 + 0.9 * breakup)) * 0.9;
   float shore = 1.0 - smoothstep(0.0, 1.4, depth);
   float bands = texture2D(uNoiseTex, vWorld.xz * 0.05).a;
   float surge = sin(depth * 3.2 - uTime * 1.3 + bands * 7.0) * 0.5 + 0.5;
@@ -273,8 +288,9 @@ void main() {
   vec2 hv = normalize(-V.xz + vec2(1e-5));
   vec2 hs = normalize(uSunDir.xz + vec2(1e-5));
   float back = pow(clamp(dot(hv, hs), 0.0, 1.0), 3.0) * (1.0 - clamp(uSunDir.y, 0.0, 1.0));
-  float lift = smoothstep(0.05, 0.9, vWorld.y);
-  vec3 sss = uSSS * (uSunColor * back * 1.2 + uSkyAmbient * 0.25) * lift;
+  // light passing through the thin top of steep crests, seen against a low sun
+  float lift = smoothstep(0.35, 1.4, vCrest) * smoothstep(0.2, 0.7, length(slope));
+  vec3 sss = uSSS * (uSunColor * back * 0.8 + uSkyAmbient * 0.12) * lift;
   premul += sss * (1.0 - F);
 #endif
 
@@ -292,12 +308,6 @@ void main() {
 /** The water surface: a camera-fitted grid with the shared water shader. */
 export function createWater(o: WaterOptions) {
   const geo = createCameraGrid({ ...o.grid });
-  const waves = Array.from({ length: MAX_WAVES }, (_, i) => {
-    const w = o.waves?.[i];
-    if (!w) return new Vector4(1, 0, 0, 1);
-    const len = Math.hypot(w.dir[0], w.dir[1]) || 1;
-    return new Vector4(w.dir[0] / len, w.dir[1] / len, w.amplitude, w.wavelength);
-  });
   const material = new ShaderMaterial({
     defines: { [o.mode.toUpperCase()]: '' },
     uniforms: {
@@ -322,8 +332,14 @@ export function createWater(o: WaterOptions) {
       uRoughFar: { value: o.roughnessFar },
       uShoreFoam: { value: o.shoreFoam },
       uSSS: { value: new Vector3(...o.sss) },
-      uWaves: { value: waves },
-      uSteep: { value: o.steepness ?? 0 },
+      uDisp0: { value: o.fft?.disp[0] ?? null },
+      uDisp1: { value: o.fft?.disp[1] ?? null },
+      uDisp2: { value: o.fft?.disp[2] ?? null },
+      uDeriv0: { value: o.fft?.deriv[0] ?? null },
+      uDeriv1: { value: o.fft?.deriv[1] ?? null },
+      uDeriv2: { value: o.fft?.deriv[2] ?? null },
+      uLengths: { value: o.fft?.lengths ?? new Vector3(1, 1, 1) },
+      uOceanN: { value: o.fft?.size ?? 1 },
       uSceneColor: { value: o.scene.color },
       uSceneDepth: { value: o.scene.depth },
       uResolution: { value: new Vector2(1, 1) },
@@ -337,37 +353,4 @@ export function createWater(o: WaterOptions) {
   mesh.frustumCulled = false;
   mesh.layers.set(LAYER_SURFACE);
   return { mesh, material };
-}
-
-/** CPU twin of the ocean vertex shader, for picking and stone physics. */
-export function oceanHeight(waves: Wave[], steep: number, x: number, z: number, t: number): number {
-  // Gerstner waves displace horizontally; find the undisplaced point by fixed-point iteration.
-  let px = x, pz = z;
-  const n = MAX_WAVES;
-  for (let it = 0; it < 3; it++) {
-    let dx = 0, dz = 0;
-    for (let i = 0; i < waves.length; i++) {
-      const w = waves[i];
-      const len = Math.hypot(w.dir[0], w.dir[1]) || 1;
-      const Dx = w.dir[0] / len, Dz = w.dir[1] / len;
-      const k = (2 * Math.PI) / w.wavelength;
-      const omega = Math.sqrt(9.81 * k);
-      const ph = k * (Dx * px + Dz * pz) - omega * t + i * 1.93;
-      const Q = steep / (k * w.amplitude * n);
-      dx += Q * w.amplitude * Dx * Math.cos(ph);
-      dz += Q * w.amplitude * Dz * Math.cos(ph);
-    }
-    px = x - dx;
-    pz = z - dz;
-  }
-  let y = 0;
-  for (let i = 0; i < waves.length; i++) {
-    const w = waves[i];
-    const len = Math.hypot(w.dir[0], w.dir[1]) || 1;
-    const k = (2 * Math.PI) / w.wavelength;
-    const omega = Math.sqrt(9.81 * k);
-    const ph = k * ((w.dir[0] / len) * px + (w.dir[1] / len) * pz) - omega * t + i * 1.93;
-    y += w.amplitude * Math.sin(ph);
-  }
-  return y;
 }

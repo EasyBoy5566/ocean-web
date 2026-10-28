@@ -12,7 +12,8 @@ import { PlanarReflection } from '../gfx/reflection';
 import { RippleSim, type SimDomain } from '../gfx/ripples';
 import { LAYER_SCENE, LAYER_SURFACE, SceneTarget } from '../gfx/composite';
 import { SplashFX } from '../gfx/splash';
-import { createWater, type WaterMode, type Wave } from '../gfx/water';
+import { FFTOcean, type SeaState } from '../gfx/ocean';
+import { createWater, type WaterMode } from '../gfx/water';
 import { bakeWaterData } from '../gfx/waterData';
 import { clamp, DEG, lerp, smoothstep } from '../util/math';
 import { Stones } from './stones';
@@ -58,8 +59,8 @@ export interface WaterLook {
   reflectionStrength: number;
   shoreFoam: number;
   sss: [number, number, number];
-  waves?: Wave[];
-  steepness?: number;
+  /** Sea state for the spectral ocean (ocean mode). */
+  sea?: SeaState;
   far: number;
 }
 
@@ -91,6 +92,7 @@ export abstract class World {
   protected terrain!: Mesh;
   protected reflection!: PlanarReflection;
   protected sim: RippleSim | null = null;
+  protected ocean: FFTOcean | null = null;
   protected dataTex!: DataTexture;
   protected splash!: SplashFX;
   protected sceneTarget!: SceneTarget;
@@ -182,6 +184,11 @@ export abstract class World {
     this.disposables.push(this.sceneTarget);
 
     const w = cfg.water;
+    if (w.sea) {
+      this.ocean = this.track(new FFTOcean(w.sea, tier.oceanN));
+      this.ocean.update(renderer, 0, 1 / 60);
+    }
+    const oc = this.ocean;
     const { mesh, material } = createWater({
       mode: w.mode,
       normalTex: this.deps.waterNormalTex,
@@ -204,8 +211,7 @@ export abstract class World {
       reflectionStrength: w.reflectionStrength,
       shoreFoam: w.shoreFoam,
       sss: w.sss,
-      waves: w.waves,
-      steepness: w.steepness,
+      fft: oc ? { disp: [0, 1, 2].map((c) => oc.disp(c)), deriv: [0, 1, 2].map((c) => oc.deriv(c)), lengths: oc.lengths, size: oc.N } : undefined,
       grid: { cols: tier.water.cols, rows: tier.water.rows, near: 0.4, far: w.far, halfWidth: cfg.terrain.halfWidth },
     });
     this.water = mesh;
@@ -302,6 +308,14 @@ export abstract class World {
     this.stones.update(dt);
     this.splash.update(dt, (x, z) => this.waterHeight(x, z), this.time);
     this.onUpdate?.(dt);
+    if (this.ocean) {
+      this.ocean.update(this.deps.renderer, this.time, dt);
+      const u = this.waterMaterial.uniforms;
+      for (let c = 0; c < 3; c++) {
+        u[`uDisp${c}`].value = this.ocean.disp(c);
+        u[`uDeriv${c}`].value = this.ocean.deriv(c);
+      }
+    }
     if (this.sim) {
       this.sim.update(this.deps.renderer, dt);
       this.waterMaterial.uniforms.uSimTex.value = this.sim.texture;
@@ -313,7 +327,7 @@ export abstract class World {
     if (params.dbg.has('noterrain')) this.terrain.visible = false;
     if (params.dbg.has('double')) this.waterMaterial.side = 2;
     if (params.dbg.has('nospec')) this.waterMaterial.uniforms.uRough.value = 0.6;
-    if (params.dbg.has('nofoam')) { this.waterMaterial.uniforms.uSteep.value = 1e-6; this.waterMaterial.uniforms.uShoreFoam.value = 0; }
+    if (params.dbg.has('nofoam')) this.waterMaterial.uniforms.uShoreFoam.value = 0;
     if (params.dbg.has('nosim')) this.waterMaterial.uniforms.uSimMap.value = new Vector4(1, 1, 1, 0);
     if (params.dbg.has('nodata')) this.waterMaterial.uniforms.uDataBounds.value = new Vector4(1e6, 1e6, 1, 1);
     if (params.dbg.has('noprops')) this.scene.children.forEach((c) => { if ((c as { isInstancedMesh?: boolean }).isInstancedMesh) c.visible = false; });

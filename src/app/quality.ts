@@ -10,6 +10,8 @@ export interface TierSettings {
   dprMax: number;
   reflectionScale: number;
   simRows: number;
+  /** FFT size of each ocean cascade. */
+  oceanN: number;
   cloudOctaves: number;
   vegetation: number;
   terrain: { cols: number; rows: number };
@@ -18,15 +20,15 @@ export interface TierSettings {
 
 export const TIERS: Record<Tier, Omit<TierSettings, 'tier'>> = {
   high: {
-    dprStart: 2, dprMin: 1, dprMax: 2, reflectionScale: 0.5, simRows: 384, cloudOctaves: 5, vegetation: 1,
+    dprStart: 2, dprMin: 1, dprMax: 2, reflectionScale: 0.5, simRows: 384, oceanN: 256, cloudOctaves: 5, vegetation: 1,
     terrain: { cols: 256, rows: 230 }, water: { cols: 160, rows: 200 },
   },
   medium: {
-    dprStart: 1.5, dprMin: 1, dprMax: 2, reflectionScale: 0.42, simRows: 320, cloudOctaves: 4, vegetation: 0.7,
+    dprStart: 1.5, dprMin: 1, dprMax: 2, reflectionScale: 0.42, simRows: 320, oceanN: 128, cloudOctaves: 4, vegetation: 0.7,
     terrain: { cols: 200, rows: 190 }, water: { cols: 128, rows: 170 },
   },
   low: {
-    dprStart: 1, dprMin: 0.75, dprMax: 1.25, reflectionScale: 0.33, simRows: 224, cloudOctaves: 3, vegetation: 0.45,
+    dprStart: 1, dprMin: 0.75, dprMax: 1.25, reflectionScale: 0.33, simRows: 224, oceanN: 128, cloudOctaves: 3, vegetation: 0.45,
     terrain: { cols: 150, rows: 150 }, water: { cols: 100, rows: 130 },
   },
 };
