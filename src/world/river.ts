@@ -1,4 +1,7 @@
-import { Color, Vector4 } from 'three';
+import { Color, Vector4, type Object3D } from 'three';
+import { loadGroundLayer, loadImpostor, loadModel, type ImpostorAtlas } from '../gfx/assets';
+import { meshParts } from '../gfx/scanned';
+import { params } from '../app/params';
 import { Fireflies } from '../gfx/fireflies';
 import { createLitMaterial } from '../gfx/materials';
 import {
@@ -6,7 +9,7 @@ import {
 } from '../gfx/props';
 import { clamp, lerp, mulberry32, smoothstep } from '../util/math';
 import { Noise2D } from '../util/noise';
-import { rgb, World, type WorldConfig } from './world';
+import { rgb, World, type PartItem, type ScannedPart, type WorldConfig } from './world';
 
 interface Boulder {
   x: number;
@@ -26,6 +29,34 @@ export class RiverWorld extends World {
   private boulders: Boulder[] = [];
   private fireflies: Fireflies | null = null;
   private pixelScale = 800;
+  private kit: { rocks: ScannedPart[]; fern: ScannedPart[]; grass: ScannedPart[]; firs: ImpostorAtlas[]; broad: ImpostorAtlas[] } | null = null;
+
+  async loadAssets() {
+    const [ground, rock, pebbles, rocksA, rocksB, fern, grass, firA, firB, firC, island, small] = await Promise.all([
+      loadGroundLayer('forest_ground_04', 2.4),
+      loadGroundLayer('mossy_rock', 4),
+      loadGroundLayer('ganges_river_pebbles', 1.3),
+      loadModel('models/rock_moss_set_01.glb'),
+      loadModel('models/rock_moss_set_02.glb'),
+      loadModel('models/fern_02.glb'),
+      loadModel('models/grass_medium_01.glb'),
+      loadImpostor('fir_a'),
+      loadImpostor('fir_b'),
+      loadImpostor('fir_c'),
+      loadImpostor('island'),
+      loadImpostor('small'),
+    ]);
+    // humid subtropical valley: greener, mossier floor than the photographed pine litter
+    this.layers = { ground: { ...ground, tint: [0.62, 0.95, 0.5] }, rock, shore: pebbles, bed: { ...pebbles, tile: 1.7 } };
+    const parts = (root: Object3D) => meshParts(root).map((p) => ({ ...p, geometry: this.track(p.geometry) }));
+    this.kit = {
+      rocks: [...parts(rocksA.scene), ...parts(rocksB.scene)],
+      fern: parts(fern.scene),
+      grass: parts(grass.scene),
+      firs: [firA, firB, firC],
+      broad: [island, small],
+    };
+  }
 
   constructor(...args: ConstructorParameters<typeof World>) {
     super(...args);
@@ -48,7 +79,7 @@ export class RiverWorld extends World {
       camera: { eyeY: 2.1, vfovPortrait: 72, vfovLandscape: 48, horizonPortrait: 0.26, horizonLandscape: 0.1, yawDeg: -10 },
       water: {
         mode: 'river',
-        absorb: [0.7, 0.2, 0.28],
+        absorb: [0.85, 0.3, 0.3],
         scatter: [0.0018, 0.0065, 0.0048],
         detail: 0.07,
         detailScale: [0.32, 0.85],
@@ -145,9 +176,11 @@ export class RiverWorld extends World {
       const a = z - b.z; // downstream is +z
       const reach = Math.abs(dx) / (b.r * 1.15);
       if (reach > 1.6 || a < -b.r * 1.6 || a > b.r * 9) continue;
-      const ring = Math.exp(-Math.pow((Math.hypot(dx, a) - b.r) / (b.r * 0.45), 2));
-      const wake = a > 0 ? Math.exp(-reach * reach * 1.4) * Math.exp(-a / (b.r * 3.2)) : 0;
-      f = Math.max(f, ring * 0.9 + wake * 0.75);
+      const ring = Math.exp(-Math.pow((Math.hypot(dx, a) - b.r * 0.95) / (b.r * 0.22), 2));
+      // upstream face piles up white water; the wake trails off downstream
+      const face = a < 0 ? 1 : 0.35;
+      const wake = a > 0 ? Math.exp(-reach * reach * 1.6) * Math.exp(-a / (b.r * 3.5)) : 0;
+      f = Math.max(f, ring * 0.7 * face + wake * 0.6);
     }
     return f;
   }
@@ -173,12 +206,13 @@ export class RiverWorld extends World {
       };
     });
     // Bank rocks, including the one the viewer stands beside.
-    const bank: Placement[] = [{ x: -0.6, y: 0.2, z: -1.2, scale: [1.6, 1.1, 1.4], rotY: 0.6, color: new Color(0.16, 0.15, 0.14) }];
+    const bank: Placement[] = [];
     for (let tries = 0; tries < 5000 && bank.length < 80; tries++) {
       const z = -2 - Math.pow(rnd(), 1.6) * 260;
       const c = this.centre(z), hw = this.halfWidth(z);
       const side = rnd() < 0.5 ? -1 : 1;
       const x = c + side * (hw + (rnd() - 0.2) * 5);
+      if (Math.hypot(x, z) < 7) continue;
       const r = 0.4 + Math.pow(rnd(), 2.2) * 2;
       const g = 0.75 + rnd() * 0.35;
       bank.push({
@@ -186,11 +220,24 @@ export class RiverWorld extends World {
         color: new Color(0.16 * g, 0.155 * g, 0.14 * g),
       });
     }
-    [21, 34].forEach((seed, i) => {
-      const geo = this.track(createRockGeometry(seed));
-      const all = [...inRiver, ...bank];
-      this.add(createInstances(geo, rockMat, all.filter((_, k) => k % 2 === i)));
-    });
+    if (this.kit) {
+      const asPart = (p: Placement, i: number, sink: number): PartItem => {
+        const sc = p.scale as number[];
+        return { x: p.x, y: p.y, z: p.z, size: sc[0] * 2.1, stretchY: 1.1, embed: sink, rotY: p.rotY, part: i * 5 + 1 };
+      };
+      if (params.dbg.has('parts')) {
+        // line up every rock part on the bank for inspection
+        this.placeParts(this.kit.rocks, this.kit.rocks.map((_, i) => ({ x: -9 + i * 1.6, y: this.terrainHeight(-9 + i * 1.6, -9), z: -9, size: 1.3, embed: 0.42, part: i, rotY: 0.4 })));
+      } else {
+        this.placeParts(this.kit.rocks, [...inRiver.map((p, i) => asPart(p, i, 0.4)), ...bank.map((p, i) => asPart(p, i + 3, 0.42))]);
+      }
+    } else {
+      [21, 34].forEach((seed, i) => {
+        const geo = this.track(createRockGeometry(seed));
+        const all = [...inRiver, ...bank];
+        this.add(createInstances(geo, rockMat, all.filter((_, k) => k % 2 === i)));
+      });
+    }
 
     // Mixed forest on the valley sides.
     const conifers: Placement[] = [];
@@ -219,10 +266,20 @@ export class RiverWorld extends World {
         conifers.push({ x, y: y - 0.4, z, scale: [h * 0.9, h, h * 0.9], rotY: rnd() * 6.28, color });
       }
     }
-    const foliage = this.track(createLitMaterial({ kind: 'foliage', sway: 0.7 }));
-    this.add(createInstances(this.track(createConiferGeometry(3)), foliage, conifers));
-    this.add(createInstances(this.track(createBroadleafGeometry(5)), foliage, broad.filter((_, i) => i % 2 === 0)));
-    this.add(createInstances(this.track(createBroadleafGeometry(8)), foliage, broad.filter((_, i) => i % 2 === 1)));
+    if (this.kit) {
+      const toTree = (p: Placement, i: number, kind: number, extra: number) => ({
+        x: p.x, y: p.y + 0.3, z: p.z, height: (p.scale as number[])[1] * extra, frame: i, flip: i % 2 === 1, kind,
+        tint: p.color ?? new Color(1, 1, 1),
+      });
+      this.plantTrees(this.kit.firs, conifers.map((p, i) => toTree(p, i, i % 3, 1.1)), 0.7);
+      this.plantTrees(this.kit.broad, broad.map((p, i) => toTree(p, i, i % 2, 0.9)), 0.9);
+      this.plantGroundCover(rnd);
+    } else {
+      const foliage = this.track(createLitMaterial({ kind: 'foliage', sway: 0.7 }));
+      this.add(createInstances(this.track(createConiferGeometry(3)), foliage, conifers));
+      this.add(createInstances(this.track(createBroadleafGeometry(5)), foliage, broad.filter((_, i) => i % 2 === 0)));
+      this.add(createInstances(this.track(createBroadleafGeometry(8)), foliage, broad.filter((_, i) => i % 2 === 1)));
+    }
 
     this.fireflies = this.track(new Fireflies(Math.round(90 * Math.max(veg, 0.6)), (r) => {
       const z = -4 - r() * 55;
@@ -231,6 +288,27 @@ export class RiverWorld extends World {
       return [x, Math.max(this.terrainHeight(x, z), 0) + 0.4 + r() * 2.2, z];
     }));
     this.add(this.fireflies.points);
+  }
+
+  /** Ferns and grass along both banks near the viewer. */
+  private plantGroundCover(rnd: () => number) {
+    if (!this.kit) return;
+    const ferns: PartItem[] = [];
+    const tufts: PartItem[] = [];
+    const n = Math.round(420 * this.deps.tier.vegetation);
+    for (let tries = 0; tries < n * 20 && ferns.length + tufts.length < n; tries++) {
+      const z = -2 - Math.pow(rnd(), 1.5) * 80;
+      const side = rnd() < 0.5 ? -1 : 1;
+      const x = this.centre(z) + side * (this.halfWidth(z) + 1.2 + rnd() * 14);
+      if (Math.abs(x) < 1.5 && z > -4) continue;
+      const y = this.terrainHeight(x, z);
+      if (y < 0.15) continue;
+      const item: PartItem = { x, y: y - 0.05, z, size: 0, rotY: rnd() * 6.28, part: Math.floor(rnd() * 17), tint: new Color(0.8 + rnd() * 0.3, 0.85 + rnd() * 0.3, 0.75) };
+      if (rnd() < 0.5) ferns.push({ ...item, size: 1.0 + rnd() * 1.0 });
+      else tufts.push({ ...item, size: 0.5 + rnd() * 0.7 });
+    }
+    this.placeParts(this.kit.fern, ferns, { foliage: true, sway: 0.08 });
+    this.placeParts(this.kit.grass, tufts, { foliage: true, sway: 0.12 });
   }
 
   resize(width: number, height: number, drawW: number, drawH: number) {

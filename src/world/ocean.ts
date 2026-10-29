@@ -1,10 +1,12 @@
-import { Color, Vector3, Vector4 } from 'three';
+import { Color, Vector3, Vector4, type Object3D } from 'three';
+import { loadGroundLayer, loadImpostor, loadModel, type GroundLayer, type ImpostorAtlas } from '../gfx/assets';
+import { createLayerMaterial, meshParts } from '../gfx/scanned';
 import { createLitMaterial } from '../gfx/materials';
 import { createBroadleafGeometry, createInstances, createRockGeometry, type Placement } from '../gfx/props';
 import type { SeaState } from '../gfx/ocean';
 import { clamp, lerp, mulberry32, smoothstep } from '../util/math';
 import { Noise2D } from '../util/noise';
-import { rgb, World, type WorldConfig } from './world';
+import { rgb, World, type ScannedPart, type WorldConfig } from './world';
 
 const SEA: SeaState = {
   windSpeed: 10.5,
@@ -44,6 +46,22 @@ export class OceanWorld extends World {
   private surfTimer = 0;
   private prevHeights: number[] = [];
   private rnd = mulberry32(31);
+  private kit: { cliff: GroundLayer; rocks: ScannedPart[]; shrubs: ImpostorAtlas[] } | null = null;
+
+  async loadAssets() {
+    const [coast, cliff, pebbles, rocksA, rocksB, island, small] = await Promise.all([
+      loadGroundLayer('coast_sand_rocks_02', 3.5),
+      loadGroundLayer('rock_face_03', 7),
+      loadGroundLayer('ganges_river_pebbles', 2.5),
+      loadModel('models/coast_rocks_03.glb'),
+      loadModel('models/coast_land_rocks_04.glb'),
+      loadImpostor('island'),
+      loadImpostor('small'),
+    ]);
+    this.layers = { ground: coast, rock: cliff, shore: coast, bed: pebbles };
+    const parts = (root: Object3D) => meshParts(root).map((p) => ({ ...p, geometry: this.track(p.geometry) }));
+    this.kit = { cliff, rocks: [...parts(rocksA.scene), ...parts(rocksB.scene)], shrubs: [island, small] };
+  }
 
   protected configure(): WorldConfig {
     return {
@@ -140,9 +158,11 @@ export class OceanWorld extends World {
     const rnd = mulberry32(99);
     const rockMat = this.track(createLitMaterial({ kind: 'rock', moss: new Color(0.06, 0.07, 0.03), mossAmount: 0.25 }));
 
-    // Sea stacks: tall weathered rocks.
+    // Sea stacks: tall weathered rocks, faced with photographed cliff rock.
     const stackGeo = this.track(createRockGeometry(41, 3, 1));
-    this.add(createInstances(stackGeo, rockMat, this.stacks.map((s, i) => ({
+    const stackMat = this.kit ? this.track(createLayerMaterial(this.kit.cliff, { triplanar: true })) : rockMat;
+    if (this.kit) stackGeo.attributes.color.array.fill(1);
+    this.add(createInstances(stackGeo, stackMat, this.stacks.map((s, i) => ({
       x: s.x, y: s.h * 0.4 - 2.5, z: s.z, scale: [s.r * 0.95, s.h * 0.66, s.r * 0.9], rotY: i * 1.7,
       color: new Color(0.1, 0.095, 0.088),
     }))));
@@ -163,10 +183,18 @@ export class OceanWorld extends World {
       });
       if (off > 0 && off < 14 && r > 1.1) this.surfPoints.push(new Vector3(x, 0, z));
     }
-    [5, 17, 29].forEach((seed, i) => {
-      const geo = this.track(createRockGeometry(seed));
-      this.add(createInstances(geo, rockMat, rocks.filter((_, k) => k % 3 === i)));
-    });
+    if (this.kit) {
+      // scanned coastal rock formations, scaled down to boulder size
+      this.placeParts(this.kit.rocks, rocks.map((r, i) => {
+        const sc = r.scale as number[];
+        return { x: r.x, y: this.terrainHeight(r.x, r.z), z: r.z, size: sc[0] * 2.4, stretchY: 1.8, embed: 0.3, rotY: r.rotY, part: i };
+      }));
+    } else {
+      [5, 17, 29].forEach((seed, i) => {
+        const geo = this.track(createRockGeometry(seed));
+        this.add(createInstances(geo, rockMat, rocks.filter((_, k) => k % 3 === i)));
+      });
+    }
     // Wind-bent shrubs and small trees on the headland.
     const veg = this.deps.tier.vegetation;
     const shrubs: Placement[] = [];
@@ -180,9 +208,16 @@ export class OceanWorld extends World {
       const s = 2.5 + rnd() * 5;
       shrubs.push({ x, y: y - 0.3, z, scale: [s * 1.3, s, s * 1.3], rotY: rnd() * 6.28, tilt: [0.15, 0.1], color: new Color(0.85, 0.9 + rnd() * 0.2, 0.8) });
     }
-    const shrubGeo = this.track(createBroadleafGeometry(12));
-    const shrubMat = this.track(createLitMaterial({ kind: 'foliage', sway: 0.5 }));
-    this.add(createInstances(shrubGeo, shrubMat, shrubs));
+    if (this.kit) {
+      this.plantTrees(this.kit.shrubs, shrubs.map((p, i) => ({
+        x: p.x, y: p.y, z: p.z, height: (p.scale as number[])[1] * 0.9, frame: i, flip: i % 2 === 0, kind: i % 2,
+        tint: p.color ?? new Color(1, 1, 1),
+      })), 1.2);
+    } else {
+      const shrubGeo = this.track(createBroadleafGeometry(12));
+      const shrubMat = this.track(createLitMaterial({ kind: 'foliage', sway: 0.5 }));
+      this.add(createInstances(shrubGeo, shrubMat, shrubs));
+    }
     this.prevHeights = this.surfPoints.map(() => 0);
   }
 

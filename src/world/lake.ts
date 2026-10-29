@@ -1,11 +1,13 @@
 import { Color, Vector4 } from 'three';
+import { loadGroundLayer, loadImpostor, loadModel, type GroundLayer, type ImpostorAtlas } from '../gfx/assets';
+import { createLayerMaterial, meshParts } from '../gfx/scanned';
 import { createLitMaterial } from '../gfx/materials';
 import {
   createBoxGeometry, createConiferGeometry, createInstances, createRockGeometry, type Placement,
 } from '../gfx/props';
 import { clamp, lerp, mulberry32, smoothstep } from '../util/math';
 import { Noise2D } from '../util/noise';
-import { rgb, World, type WorldConfig } from './world';
+import { rgb, World, type PartItem, type ScannedPart, type WorldConfig } from './world';
 
 /** Smooth minimum (polynomial), keeps shorelines rounded where edges meet. */
 function smin(a: number, b: number, k: number) {
@@ -24,6 +26,32 @@ export class LakeWorld extends World {
   private noise = new Noise2D(1234);
   private nextFish = 2;
   private rnd = mulberry32(77);
+  private kit: {
+    wood: GroundLayer;
+    rocks: ScannedPart[];
+    fern: ScannedPart[];
+    grass: ScannedPart[];
+    firs: ImpostorAtlas[];
+  } | null = null;
+
+  async loadAssets() {
+    const [ground, rock, pebbles, wood, rocksA, rocksB, fern, grass, ...firs] = await Promise.all([
+      loadGroundLayer('forest_ground_04', 2.6),
+      loadGroundLayer('rock_face_03', 6),
+      loadGroundLayer('ganges_river_pebbles', 1.4),
+      loadGroundLayer('old_planks_02', 2.4),
+      loadModel('models/rock_moss_set_01.glb'),
+      loadModel('models/rock_moss_set_02.glb'),
+      loadModel('models/fern_02.glb'),
+      loadModel('models/grass_medium_02.glb'),
+      loadImpostor('fir_a'),
+      loadImpostor('fir_b'),
+      loadImpostor('fir_c'),
+    ]);
+    this.layers = { ground, rock, shore: pebbles, bed: { ...pebbles, tile: 2.2 } };
+    const parts = (g: { scene: import('three').Object3D }) => meshParts(g.scene).map((p) => ({ ...p, geometry: this.track(p.geometry) }));
+    this.kit = { wood, rocks: [...parts(rocksA), ...parts(rocksB)], fern: parts(fern), grass: parts(grass), firs };
+  }
 
   protected configure(): WorldConfig {
     return {
@@ -129,9 +157,16 @@ export class LakeWorld extends World {
         color: new Color(tint, tint * (0.9 + rnd() * 0.2), tint),
       });
     }
-    const treeGeo = this.track(createConiferGeometry());
-    const treeMat = this.track(createLitMaterial({ kind: 'foliage', sway: 0.6 }));
-    this.add(createInstances(treeGeo, treeMat, trees));
+    if (this.kit) {
+      this.plantTrees(this.kit.firs, trees.map((t, i) => ({
+        x: t.x, y: t.y + 0.4, z: t.z, height: (t.scale as number[])[1] * 1.15, frame: i, flip: i % 2 === 0, kind: i % 3,
+        tint: t.color ?? new Color(1, 1, 1),
+      })), 0.7);
+    } else {
+      const treeGeo = this.track(createConiferGeometry());
+      const treeMat = this.track(createLitMaterial({ kind: 'foliage', sway: 0.6 }));
+      this.add(createInstances(treeGeo, treeMat, trees));
+    }
 
     // Boulders along the near shoreline and a few in the shallows.
     const rocks: Placement[] = [];
@@ -147,18 +182,46 @@ export class LakeWorld extends World {
         color: new Color(0.2 * g, 0.19 * g, 0.18 * g),
       });
     }
-    const rockMat = this.track(createLitMaterial({ kind: 'rock', moss: new Color(0.035, 0.06, 0.02), mossAmount: 0.7 }));
-    [3, 8].forEach((seed, i) => {
-      const geo = this.track(createRockGeometry(seed));
-      this.add(createInstances(geo, rockMat, rocks.filter((_, k) => k % 2 === i)));
-    });
+    if (this.kit) {
+      this.placeParts(this.kit.rocks, rocks.map((r, i) => {
+        const sc = r.scale as number[];
+        return { x: r.x, y: this.terrainHeight(r.x, r.z), z: r.z, size: sc[0] * 2, embed: 0.4, rotY: r.rotY, part: i };
+      }));
+      this.plantGroundCover(rnd);
+    } else {
+      const rockMat = this.track(createLitMaterial({ kind: 'rock', moss: new Color(0.035, 0.06, 0.02), mossAmount: 0.7 }));
+      [3, 8].forEach((seed, i) => {
+        const geo = this.track(createRockGeometry(seed));
+        this.add(createInstances(geo, rockMat, rocks.filter((_, k) => k % 2 === i)));
+      });
+    }
 
     this.buildDock();
   }
 
+  /** Ferns and grass tufts on the banks close to the viewer. */
+  private plantGroundCover(rnd: () => number) {
+    if (!this.kit) return;
+    const ferns: PartItem[] = [];
+    const tufts: PartItem[] = [];
+    const n = Math.round(260 * this.deps.tier.vegetation);
+    for (let tries = 0; tries < n * 20 && ferns.length + tufts.length < n; tries++) {
+      const z = -3 - Math.pow(rnd(), 1.4) * 90;
+      const x = (rnd() * 2 - 1) * (30 + 0.9 * -z);
+      const s = this.shore(x, z);
+      if (s > -0.6 || s < -14) continue;
+      const y = this.terrainHeight(x, z);
+      const item: PartItem = { x, y: y - 0.05, z, size: 0, rotY: rnd() * 6.28, part: Math.floor(rnd() * 8), tint: new Color(0.85 + rnd() * 0.3, 0.85 + rnd() * 0.3, 0.8) };
+      if (rnd() < 0.45) ferns.push({ ...item, size: 0.9 + rnd() * 0.8 });
+      else tufts.push({ ...item, size: 0.5 + rnd() * 0.6 });
+    }
+    this.placeParts(this.kit.fern, ferns, { foliage: true, sway: 0.08 });
+    this.placeParts(this.kit.grass, tufts, { foliage: true, sway: 0.12 });
+  }
+
   private buildDock() {
-    const wood = new Color(0.11, 0.085, 0.062);
-    const mat = this.track(createLitMaterial({ kind: 'wood' }));
+    const wood = this.kit ? new Color(1, 1, 1) : new Color(0.11, 0.085, 0.062);
+    const mat = this.kit ? this.track(createLayerMaterial(this.kit.wood, { worldUV: true, swapUV: true })) : this.track(createLitMaterial({ kind: 'wood' }));
     const plankGeo = this.track(createBoxGeometry(2.3, 0.06, 0.2, wood));
     const planks: Placement[] = [];
     const rnd = mulberry32(9);

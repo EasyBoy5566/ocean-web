@@ -1,18 +1,23 @@
 import {
   BufferAttribute, Color, Float32BufferAttribute, Mesh, PerspectiveCamera, Raycaster, Scene, Vector2, Vector3, Vector4,
-  type DataTexture, type Object3D, type ShaderMaterial, type Texture, type WebGLRenderer,
+  type BufferGeometry, type DataTexture, type MeshStandardMaterial, type Object3D, type ShaderMaterial, type Texture,
+  type WebGLRenderer,
 } from 'three';
 import { params } from '../app/params';
 import type { TierSettings } from '../app/quality';
 import type { Environment, EnvironmentConfig } from '../env/environment';
 import { globals } from '../gfx/globals';
 import { createCameraGrid } from '../gfx/grid';
-import { createTerrainMaterial, type TerrainColors } from '../gfx/materials';
+import { createTerrainMaterial, type TerrainColors, type TerrainLayers } from '../gfx/materials';
 import { PlanarReflection } from '../gfx/reflection';
 import { RippleSim, type SimDomain } from '../gfx/ripples';
 import { LAYER_SCENE, LAYER_SURFACE, SceneTarget } from '../gfx/composite';
 import { SplashFX } from '../gfx/splash';
+import type { ImpostorAtlas } from '../gfx/assets';
 import { FFTOcean, type SeaState } from '../gfx/ocean';
+import {
+  createImpostors, createScannedMaterial, scatter, type ScannedOptions, type TreeItem,
+} from '../gfx/scanned';
 import { createWater, type WaterMode } from '../gfx/water';
 import { bakeWaterData } from '../gfx/waterData';
 import { clamp, DEG, lerp, smoothstep } from '../util/math';
@@ -93,6 +98,8 @@ export abstract class World {
   protected reflection!: PlanarReflection;
   protected sim: RippleSim | null = null;
   protected ocean: FFTOcean | null = null;
+  /** Photoscanned ground layers, when the scene loaded them. */
+  protected layers: TerrainLayers | undefined;
   protected dataTex!: DataTexture;
   protected splash!: SplashFX;
   protected sceneTarget!: SceneTarget;
@@ -107,6 +114,8 @@ export abstract class World {
   }
 
   protected abstract configure(): WorldConfig;
+  /** Fetch textures and models before build(); scenes override this. */
+  async loadAssets(): Promise<void> {}
   /** Ground height (m) relative to the mean water level. Negative = under water. */
   abstract terrainHeight(x: number, z: number): number;
   /** Per-vertex terrain material weights: forest, rock, sand, dry. */
@@ -154,7 +163,7 @@ export abstract class World {
       mask.set(m, i * 4);
     }
     tgeo.setAttribute('aMask', new Float32BufferAttribute(mask, 4));
-    const tmat = createTerrainMaterial(cfg.terrain.colors);
+    const tmat = createTerrainMaterial(cfg.terrain.colors, this.layers);
     this.terrain = new Mesh(tgeo, tmat);
     this.terrain.frustumCulled = false;
     this.scene.add(this.terrain);
@@ -271,6 +280,54 @@ export abstract class World {
 
   protected add(o: Object3D) {
     this.scene.add(o);
+  }
+
+  private scannedCache = new Map<string, ShaderMaterial>();
+
+  /** One shader material per source material and option set, shared by all its instances. */
+  protected scannedMaterial(src: MeshStandardMaterial, o: ScannedOptions = {}): ShaderMaterial {
+    const key = `${src.uuid}|${JSON.stringify(o)}`;
+    let m = this.scannedCache.get(key);
+    if (!m) {
+      m = this.track(createScannedMaterial(src, o));
+      this.scannedCache.set(key, m);
+    }
+    return m;
+  }
+
+  /**
+   * Scatters scanned model parts: each placement gets a part (round robin) and
+   * is scaled so the part's footprint matches `size` metres across.
+   */
+  protected placeParts(parts: ScannedPart[], items: PartItem[], o: ScannedOptions = {}) {
+    if (!parts.length || !items.length) return;
+    const groups = parts.map(() => [] as PartItem[]);
+    items.forEach((it, i) => groups[(it.part ?? i) % parts.length].push(it));
+    groups.forEach((group, i) => {
+      if (!group.length) return;
+      const part = parts[i];
+      const foot = Math.max(part.size.x, part.size.z, 1e-3);
+      const mat = this.scannedMaterial(part.material, o);
+      const mesh = scatter(part.geometry, mat, group.map((it) => {
+        const k = it.size / foot;
+        const ky = k * (it.stretchY ?? 1);
+        const y = it.y - part.size.y * ky * (it.embed ?? 0);
+        return { x: it.x, y, z: it.z, scale: [k, ky, k], rotY: it.rotY, tilt: it.tilt, tint: it.tint };
+      }));
+      this.add(mesh);
+    });
+  }
+
+  /** Billboard trees; `kind` picks the atlas. */
+  protected plantTrees(atlases: ImpostorAtlas[], items: (TreeItem & { kind: number })[], sway = 1) {
+    atlases.forEach((atlas, k) => {
+      const mine = items.filter((t) => t.kind % atlases.length === k);
+      if (!mine.length) return;
+      const mesh = createImpostors(atlas, mine, sway);
+      this.track(mesh.geometry);
+      this.track(mesh.material as ShaderMaterial);
+      this.add(mesh);
+    });
   }
 
   resize(width: number, height: number, drawW: number, drawH: number) {
@@ -408,3 +465,25 @@ export abstract class World {
 }
 
 export const rgb = (r: number, g: number, b: number) => new Color(r, g, b);
+
+export interface ScannedPart {
+  geometry: BufferGeometry;
+  material: MeshStandardMaterial;
+  size: Vector3;
+  name: string;
+}
+
+export interface PartItem {
+  x: number;
+  y: number;
+  z: number;
+  /** Footprint across, metres. */
+  size: number;
+  stretchY?: number;
+  /** Fraction of the part's height pushed below `y` (hides the cut skirt of scanned rocks). */
+  embed?: number;
+  rotY?: number;
+  tilt?: [number, number];
+  tint?: Color;
+  part?: number;
+}

@@ -113,12 +113,18 @@ export class App {
     return new LakeWorld(deps);
   }
 
-  /** Builds and activates a scene (disposing the previous one). */
-  loadScene(id: SceneId) {
+  /** Loads assets for, builds and activates a scene (disposing the previous one). */
+  async loadScene(id: SceneId) {
+    const w = this.createWorld(id);
+    try {
+      await w.loadAssets();
+    } catch (e) {
+      // missing assets: fall back to the procedural look rather than a blank scene
+      console.warn('scene assets failed to load', e);
+    }
     const old = this.world;
     this.world = null;
     old?.dispose();
-    const w = this.createWorld(id);
     w.build();
     w.activate();
     this.world = w;
@@ -138,7 +144,7 @@ export class App {
       fade.classList.add('on');
       await new Promise((r) => setTimeout(r, 450));
     }
-    this.loadScene(id);
+    await this.loadScene(id);
     if (fade) {
       await new Promise((r) => requestAnimationFrame(() => r(null)));
       fade.classList.remove('on');
@@ -153,7 +159,7 @@ export class App {
     this.env.setCloudOctaves(this.tier.cloudOctaves);
     const id = this.sceneId;
     this.sceneId = '' as SceneId;
-    this.loadScene(id);
+    void this.loadScene(id);
   }
 
   setSound(s: SoundSink) {

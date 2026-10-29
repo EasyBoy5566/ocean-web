@@ -18,10 +18,16 @@ Tap the water to splash, swipe up to throw a stone, flick fast and flat to skip 
   view so detail stays constant on screen.
 - **Scenes**: every scene has a fixed camera; terrain and water meshes are fitted
   to that view, which acts as free level-of-detail.
-- **Sound**: synthesised live with Web Audio (no audio files): surf, lapping water,
-  a babbling river, birds, gulls, crickets, frogs, splashes.
+- **Ocean**: Tessendorf FFT ocean (JONSWAP wind sea + swell, three cascades) computed
+  every frame in WebGL2 fragment passes, with Jacobian whitecaps.
+- **Scenery**: photoscanned CC0 ground materials, rocks and plants from Poly Haven; trees
+  are billboards baked from scanned models and lit live (`public/media/CREDITS.md`).
+- **Interaction**: the scene is captured first so the water refracts it; splashes have a
+  crown, a Worthington jet, motion-blurred droplets and rising bubbles.
+- **Sound**: CC0 field recordings from Freesound (`public/audio/CREDITS.md`).
 - **Performance**: quality tier picked per device, with render resolution adapted
-  continuously to hold the frame rate. The whole site is about 180 KB gzipped.
+  continuously to hold the frame rate. Code is about 180 KB gzipped; each scene then
+  loads 3–6 MB of textures, models and sound.
 
 ## Location and privacy
 

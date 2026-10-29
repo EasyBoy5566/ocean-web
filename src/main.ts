@@ -34,8 +34,10 @@ function boot() {
     return;
   }
   const hud = new Hud(app, document.getElementById('ui')!);
-  app.loadScene(pickScene());
+  // stay behind the fade until the first scene's assets have arrived
+  hud.fadeEl.classList.add('on');
   app.start();
+  void app.loadScene(pickScene()).then(() => requestAnimationFrame(() => hud.fadeEl.classList.remove('on')));
   void app.locate();
   if (params.autostart) hud.autostart();
   window.addEventListener('hashchange', () => {
